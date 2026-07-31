@@ -39,13 +39,19 @@ This is the first public release, and there's a lot more to build. If you're int
 
 Primework is now open source. Feel free to explore it, open issues, suggest ideas, or contribute.
 
-**[Website →](https://kunstx.online/primework)**
+**[Website →](https://kunstx.online/primework)** &nbsp;·&nbsp; **[GitHub →](https://github.com/kunstx-src/primework)**
 
 ---
 
 ## Quick Start
 
-Primework is a single self-contained file. Copy `primework.js` into your project and include it as a `<script>` tag — no npm, no bundler, no build step. The `Primework` class is exposed as a global.
+Primework is a single self-contained file. Grab `primework.js` and include it as a `<script>` tag — no npm, no bundler, no build step. The `Primework` class is exposed as a global.
+
+```bash
+git clone https://github.com/kunstx-src/primework.git
+```
+
+Or just download [`primework.js`](https://github.com/kunstx-src/primework/blob/main/primework.js) directly and drop it into your project.
 
 ```html
 <!DOCTYPE html>
@@ -93,8 +99,9 @@ const pw = new Primework({ viewport, mode: 'overlay', clearColor: 'transparent' 
 
 ### Learn more
 
-- **[Full documentation](https://kunstx.online/primework/documentation.html)** — every element type, style property, and API, live and interactive.
+- **[Full documentation](documentation.html)** — every element type, style property, and API, live and interactive.
 - **[Website](https://kunstx.online/primework)** — Primework's own site, built with itself.
+- **[GitHub](https://github.com/kunstx-src/primework)** — source, issues, and releases.
 
 ---
 
@@ -218,7 +225,7 @@ Primework focuses on the areas where rendering quality becomes a feature rather 
 
 Contributions are welcome.
 
-Whether it's reporting issues, improving documentation, proposing ideas, or submitting pull requests, we'd love your help in shaping Primework.
+Whether it's [reporting issues](https://github.com/kunstx-src/primework/issues), improving documentation, proposing ideas, or submitting pull requests, we'd love your help in shaping Primework.
 
 ---
 
