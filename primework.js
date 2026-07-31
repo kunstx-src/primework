@@ -591,6 +591,7 @@ class Primework {
     // overlay: canvas is position:fixed, viewport needs no overflow changes
 
     this.canvas = document.createElement('canvas');
+    this.canvas.setAttribute('aria-hidden', 'true'); // the DOM aliases (htmlTop/htmlLayer/htmlBottom) are the single source of accessible truth
     // overlay: canvas is position:fixed so it floats above all page content
     const canvasPos = this.mode === 'overlay' ? 'fixed' : 'absolute';
     this.canvas.style.cssText = 'position:' + canvasPos + ';top:0;left:0;z-index:1;display:block;pointer-events:none;';
@@ -1203,16 +1204,26 @@ class Primework {
   }
 
   _hitTest(x, y) {
-    // x,y are in doc-space. Fixed nodes live in viewport-space.
+    // x,y are in doc-space. Fixed nodes live in viewport-space and are always
+    // painted in a separate pass on top of scrollable content (see _render) --
+    // hit-testing has to mirror that same two-pass priority, or a scrolled
+    // section can out-rank a fixed element that's actually on top of it.
     const viewY = y - this.scrollY;
-    // Use descending zIndex order — topmost painted node gets the hit
+    // Use descending zIndex order — topmost painted node (within its pass) gets the hit
     const ordered = this._byZ ? [...this._byZ].reverse() : [...this.nodes].reverse();
+    // Pass 1: fixed nodes -- always visually on top, so always checked first
     for (const n of ordered) {
+      if (!n.fixed) continue;
       const g = n._g;
       if (!g || g.width <= 0 || g.height <= 0) continue;
-      const nx = g.x, ny = n.fixed ? g.y : g.y, nw = g.width, nh = g.height;
-      const testY = n.fixed ? viewY : y;
-      if (nx <= x && x <= nx+nw && ny <= testY && testY <= ny+nh) return n;
+      if (g.x <= x && x <= g.x+g.width && g.y <= viewY && viewY <= g.y+g.height) return n;
+    }
+    // Pass 2: scrollable nodes
+    for (const n of ordered) {
+      if (n.fixed) continue;
+      const g = n._g;
+      if (!g || g.width <= 0 || g.height <= 0) continue;
+      if (g.x <= x && x <= g.x+g.width && g.y <= y && y <= g.y+g.height) return n;
     }
     return null;
   }
