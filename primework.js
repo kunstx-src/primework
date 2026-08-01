@@ -467,9 +467,8 @@ function applyTx(text, tx) {
 
 class Primework {
 
-  constructor({ viewport, onSelect, onChange, clearColor, mode = 'isolated' }) {
+  constructor({ viewport, onChange, clearColor, mode = 'isolated' }) {
     this.viewport    = viewport;
-    this.onSelect    = onSelect;
     this.onChange    = onChange;
     this.clearColor  = clearColor ?? '#ffffff';
     this._config     = new PrimeworkConfig();
@@ -482,11 +481,9 @@ class Primework {
     this.DOC_W       = 0;
     this.DOC_H       = 0;
     this.nodes       = [];
-    this.selectedId  = null;
     this.hoveredId   = null;
     this._dpr        = Math.min(window.devicePixelRatio || 1, 2);
     this.htmlMode    = false;
-    this.previewMode = false;
     this._textSel    = null;
     this.scrollY     = 0;
     this._maxScrollY = 0;
@@ -1060,24 +1057,14 @@ class Primework {
     this.nodes = this.nodes.filter(n => n.id!==id);
     this._zDirty = true;
     this._needsValidation = true;
-    if (this.selectedId===id) { this.selectedId=null; this.onSelect?.(null); }
     this._render(); this._syncAliases(); this.onChange?.(this.nodes); return this;
   }
 
-  select(id)   { this.selectedId=id;   this._render(); this._refreshAliases(); }
-  deselect()   { this.selectedId=null; this.focusedId=null; this._render(); this._refreshAliases(); }
   getModel()   { return this.nodes.map(({_g,...n})=>n); }
 
   setHtmlMode(on) {
     this.htmlMode = on;
     this._refreshAliases();
-  }
-
-  setPreviewMode(on) {
-    this.previewMode = on;
-    if (!on) { this._textSel=null; window.getSelection()?.removeAllRanges(); this.selectedId=null; }
-    // Don't reset scrollY — preserve position when switching modes
-    this._render(); this._syncScrollOnAliases(); this._refreshAliases();
   }
 
   destroy() {
@@ -1105,7 +1092,7 @@ class Primework {
 
   _onKeyDown(e) {
     // Ctrl/Cmd+C: copy canvas text selection to clipboard
-    if ((e.ctrlKey || e.metaKey) && e.key === 'c' && this._textSel && this.previewMode) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'c' && this._textSel) {
       const { nodeId, anchor, focus } = this._textSel;
       const start = Math.min(anchor, focus), end = Math.max(anchor, focus);
       if (start < end) {
@@ -1269,7 +1256,6 @@ class Primework {
         return;
       }
     }
-    if (!this.previewMode) return;
     const { x, y } = this._coords(e);
     const node = this._hitTest(x, y);
     if (!node || (!this._TEXT_TYPES.has(node.type) && !node.textSelectable)) return;
@@ -1295,7 +1281,7 @@ class Primework {
       return;
     }
     const { x, y } = this._coords(e);
-    if (this.previewMode && this._textSel?.active) {
+    if (this._textSel?.active) {
       const node = this.nodes.find(n=>n.id===this._textSel.nodeId);
       if (node) { this._textSel.focus=this._pixelToCharIdx(node,x,y); this._render(); }
       return;
@@ -1311,15 +1297,11 @@ class Primework {
       // per-node onHover(true) on the newly hovered node
       node?.onHover?.({ node, hovered:true });
     }
-    if (this.previewMode) {
-      // pointer > text > default — buttons/links always pointer regardless of TEXT_TYPES membership
-      const isPointer = node && (node.type==='button'||node.type==='link'||node.type==='badge'
-                                 || node?.cursor==='pointer');
-      const isText    = node && !isPointer && (this._TEXT_TYPES.has(node.type) || node.textSelectable);
-      this.interactLayer.style.cursor = isPointer ? 'pointer' : isText ? 'text' : 'default';
-    } else {
-      this.interactLayer.style.cursor = node ? 'pointer' : 'default';
-    }
+    // pointer > text > default — buttons/links always pointer regardless of TEXT_TYPES membership
+    const isPointer = node && (node.type==='button'||node.type==='link'||node.type==='badge'
+                               || node?.cursor==='pointer');
+    const isText    = node && !isPointer && (this._TEXT_TYPES.has(node.type) || node.textSelectable);
+    this.interactLayer.style.cursor = isPointer ? 'pointer' : isText ? 'text' : 'default';
   }
 
   _onClick(e) {
@@ -1327,42 +1309,30 @@ class Primework {
     const node = this._hitTest(x, y);
     // Disabled nodes absorb the click but do nothing
     if (node?.disabled || this._nodeStyle(node || {})?.disabled) return;
-    if (this.previewMode) {
-      const isTextNode = node && (this._TEXT_TYPES.has(node.type) || node.textSelectable);
-      if (this._textSel && Math.abs(this._textSel.anchor-this._textSel.focus)>0) {
-        if (!isTextNode) {
-          // Clicking a non-text node: clear selection and fall through to onClick
-          this._textSel = null;
-          this._render();
-        } else {
-          return; // clicking another text node while selected: keep selection, block click
-        }
-      }
-      if (node?.type==='link'||node?.type==='button')
-        (this.htmlTop.querySelector(`[data-canvas-id="${node.id}"]`) || this.htmlLayer.querySelector(`[data-canvas-id="${node.id}"]`) || this.htmlBottom.querySelector(`[data-canvas-id="${node.id}"]`))?.click();
-      // Per-node onClick — always fired in preview mode
-      if (node?.type === 'button' || node?.type === 'link') {
-        this.activeId = node.id;
-        clearTimeout(this._activeTimer);
+    const isTextNode = node && (this._TEXT_TYPES.has(node.type) || node.textSelectable);
+    if (this._textSel && Math.abs(this._textSel.anchor-this._textSel.focus)>0) {
+      if (!isTextNode) {
+        // Clicking a non-text node: clear selection and fall through to onClick
+        this._textSel = null;
         this._render();
-        this._activeTimer = setTimeout(() => { this.activeId = null; this._render(); }, 150);
+      } else {
+        return; // clicking another text node while selected: keep selection, block click
       }
-      node?.onClick?.({ node, x, y, event:e });
-      return;
     }
-    // Design mode
-    this.selectedId = node?.id ?? null;
-    this.activeId = node?.id ?? null;
-    clearTimeout(this._activeTimer);
-    this._render(); this._refreshAliases();
-    this.onSelect?.(node ?? null);
+    if (node?.type==='link'||node?.type==='button')
+      (this.htmlTop.querySelector(`[data-canvas-id="${node.id}"]`) || this.htmlLayer.querySelector(`[data-canvas-id="${node.id}"]`) || this.htmlBottom.querySelector(`[data-canvas-id="${node.id}"]`))?.click();
+    if (node?.type === 'button' || node?.type === 'link') {
+      this.activeId = node.id;
+      clearTimeout(this._activeTimer);
+      this._render();
+      this._activeTimer = setTimeout(() => { this.activeId = null; this._render(); }, 150);
+    }
     node?.onClick?.({ node, x, y, event:e });
-    this._activeTimer = setTimeout(() => { this.activeId = null; this._render(); }, 150);
   }
 
   _onMouseUp(e) {
     if (this._sbDragging) { this._sbDragging = false; return; }
-    if (!this.previewMode || !this._textSel?.active) return;
+    if (!this._textSel?.active) return;
     this._textSel.active = false;
     const { nodeId, anchor, focus } = this._textSel;
     const start=Math.min(anchor,focus), end=Math.max(anchor,focus);
@@ -1379,7 +1349,7 @@ class Primework {
   }
 
   _onCopy(e) {
-    if (!this._textSel || !this.previewMode) return;
+    if (!this._textSel) return;
     const { nodeId, anchor, focus } = this._textSel;
     const start=Math.min(anchor,focus), end=Math.max(anchor,focus);
     if (start>=end) return;
@@ -1665,10 +1635,8 @@ class Primework {
     const { ctx } = this;
     const { id, type, content, _g:g } = node;
     if (!g || g.width <= 0 || g.height <= 0) return; // skip zero-size nodes
-    const panelSel = id === this.selectedId;          // selected from panel (any mode)
-    const sel = !this.previewMode && panelSel;           // full chrome only in design mode
-    const hov = id===this.hoveredId && !sel;
-    const previewHover = this.previewMode && hov && (type==='button'||type==='link');
+    const hov = id===this.hoveredId;
+    const previewHover = hov && (type==='button'||type==='link');
     const s = this._nodeStyle(node, previewHover, false);
 
     ctx.save();
@@ -1676,44 +1644,8 @@ class Primework {
     // ── Opacity ──────────────────────────────────────────────────────────────
     if (s.opacity != null && s.opacity !== 1) ctx.globalAlpha = Math.max(0, Math.min(1, s.opacity));
 
-    // ── Design mode chrome ───────────────────────────────────────────────────
-    if (!this.previewMode && hov) {
-      ctx.save(); ctx.globalAlpha = 1;
-      ctx.fillStyle='rgba(15,98,254,0.04)';
-      ctx.fillRect(g.x-4,g.y-4,g.width+8,g.height+8);
-      ctx.restore();
-    }
-    if (sel) {
-      ctx.save(); ctx.globalAlpha = 1;
-      ctx.fillStyle='rgba(15,98,254,0.06)'; ctx.fillRect(g.x-6,g.y-6,g.width+12,g.height+12);
-      ctx.strokeStyle='#4589ff'; ctx.lineWidth=1.5; ctx.setLineDash([5,3]);
-      ctx.strokeRect(g.x-6,g.y-6,g.width+12,g.height+12); ctx.setLineDash([]);
-      ctx.fillStyle='#4589ff';
-      for (const [hx,hy] of [[g.x-6,g.y-6],[g.x+g.width+6,g.y-6],[g.x-6,g.y+g.height+6],[g.x+g.width+6,g.y+g.height+6]])
-        ctx.fillRect(hx-2.5,hy-2.5,5,5);
-      ctx.restore();
-    }
-
-    // In preview mode: subtle ring when selected from the right panel
-    if (this.previewMode && panelSel) {
-      ctx.save(); ctx.globalAlpha = 1;
-      ctx.strokeStyle = 'rgba(69,137,255,0.7)'; ctx.lineWidth = 1.5;
-      ctx.setLineDash([5, 3]);
-      ctx.strokeRect(g.x - 3, g.y - 3, g.width + 6, g.height + 6);
-      ctx.setLineDash([]);
-      ctx.restore();
-    }
-
     // Keyboard focus ring — drawn when this node's alias has DOM focus
-    if (!this.previewMode && id === this.focusedId) {
-      ctx.save(); ctx.globalAlpha = 1;
-      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
-      ctx.strokeRect(g.x - 3, g.y - 3, g.width + 6, g.height + 6);
-      ctx.strokeStyle = '#0f62fe'; ctx.lineWidth = 1.5;
-      ctx.strokeRect(g.x - 3, g.y - 3, g.width + 6, g.height + 6);
-      ctx.restore();
-    }
-    if (this.previewMode && id === this.focusedId) {
+    if (id === this.focusedId) {
       ctx.save(); ctx.globalAlpha = 1;
       ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
       ctx.strokeRect(g.x - 2, g.y - 2, g.width + 4, g.height + 4);
@@ -1733,7 +1665,7 @@ class Primework {
       }
       ctx.restore(); // restore even if render threw
       ctx.restore(); // restore outer _drawNode save
-      if (this.previewMode && (this._TEXT_TYPES.has(type) || node.textSelectable)) this._drawTextSelection(node);
+      if (this._TEXT_TYPES.has(type) || node.textSelectable) this._drawTextSelection(node);
       return;
     }
 
@@ -1766,7 +1698,7 @@ class Primework {
       }
 
       case 'button': {
-        const bs = this.previewMode ? this._nodeStyle(node, hov, this.activeId===id) : s;
+        const bs = this._nodeStyle(node, hov, this.activeId===id);
         this._drawSurface(g, bs);
         const { fontStr } = this._fontSpec(node, bs);
         ctx.save();
@@ -1783,7 +1715,7 @@ class Primework {
       }
 
       case 'link': {
-        const ls = this.previewMode ? this._nodeStyle(node, hov, false) : s;
+        const ls = this._nodeStyle(node, hov, false);
         const { fontStr, size } = this._fontSpec(node, ls);
         ctx.save();
         ctx.font = fontStr;
@@ -1886,7 +1818,7 @@ class Primework {
     }
 
     ctx.restore();
-    if (this.previewMode && this._TEXT_TYPES.has(type)) this._drawTextSelection(node);
+    if (this._TEXT_TYPES.has(type)) this._drawTextSelection(node);
   }
 
   // Draw a background surface — handles solid colours, gradients, shadow, border
@@ -2235,7 +2167,11 @@ class Primework {
     const s    = this._nodeStyle(node);
     const isInteractive = type === 'button' || type === 'link';
     const isDisabled    = node.disabled || s.disabled || false;
-    const tag  = this._TAGS[type] || 'div';
+    // node.tag lets a node render its alias as a different element than its
+    // type implies -- e.g. a node styled like heading1 for visual purposes
+    // only (a showcase sample, a decorative label) can alias to <div>/<p>
+    // instead of <h1>, so it doesn't pollute the real document/heading outline.
+    const tag  = node.tag || this._TAGS[type] || 'div';
     const el   = document.createElement(tag);
 
     // ── Dataset ─────────────────────────────────────────────────────────────
@@ -2359,7 +2295,6 @@ class Primework {
       const s    = node ? this._nodeStyle(node) : {};
       const isDisabled = node?.disabled || s.disabled || false;
 
-      el.setAttribute('aria-selected', id === this.selectedId ? 'true' : 'false');
       el.setAttribute('aria-disabled',  isDisabled ? 'true' : 'false');
 
       // Purely decorative background rects and dividers have no semantic content
@@ -2370,11 +2305,9 @@ class Primework {
         !node.content && !node.ariaLabel && !node.role && !node.onClick;
 
       el.style.outline = (this.htmlMode && !isDecorative)
-        ? (id === this.selectedId
-            ? '2px solid rgba(15,98,254,0.6)'
-            : id === this.focusedId
-              ? '2px solid rgba(15,98,254,0.9)'
-              : '1px dashed rgba(69,137,255,0.25)')
+        ? (id === this.focusedId
+            ? '2px solid rgba(15,98,254,0.9)'
+            : '1px dashed rgba(69,137,255,0.25)')
         : 'none';
     }
   }
