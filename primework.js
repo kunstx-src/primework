@@ -1723,18 +1723,17 @@ class Primework {
         ctx.fillStyle = ls.color || '#0f62fe';
 
         // Vertical centering: measure with alphabetic baseline
-        // capAsc = cap height above baseline, descBelLink = descender below baseline
+        // capAsc = cap height above baseline
         ctx.textBaseline = 'alphabetic';
         const capAscLink  = ctx.measureText('H').actualBoundingBoxAscent;
-        const descBelLink = ctx.measureText('pqgjy').actualBoundingBoxDescent;
         // Default: baseline just below g.y so cap-top aligns to g.y
         let linkBaselineY = g.y + capAscLink;
-        // When verticalAlign:'middle' AND node has explicit height, center optically
+        // When verticalAlign:'middle' AND node has explicit height, center optically.
+        // Same cap-height-only rule as button/badge -- keeps boxed links (e.g. a
+        // ghost-button-style link sitting next to a real button) centered on the
+        // identical baseline, not a couple pixels off from accounting for descenders.
         if (ls.verticalAlign === 'middle' && g.height > 0) {
-          // Place baseline so midpoint between cap-top and descender-bottom = node center
-          // baseline + (desc - cap)/2 = g.y + g.height/2
-          // baseline = g.y + g.height/2 + (capAscLink - descBelLink)/2
-          linkBaselineY = g.y + g.height / 2 + (capAscLink - descBelLink) / 2;
+          linkBaselineY = g.y + g.height / 2 + capAscLink / 2;
         }
 
         const lt = applyTx(content || '', ls.textTransform);
@@ -2213,6 +2212,7 @@ class Primework {
     }
 
     // ── Base styles — always transparent, always pointer-events:none except for focus ─
+    const isTextSelectable = this._TEXT_TYPES.has(type) || node.textSelectable;
     el.style.cssText = `
       position:absolute;
       left:${g.x}px; top:${g.y}px; width:${g.width}px; height:${g.height}px;
@@ -2223,7 +2223,9 @@ class Primework {
       padding:0; margin:0; border:none; outline:none;
       text-decoration:none; box-sizing:border-box;
       pointer-events:none;
-      user-select:none; -webkit-user-select:none;
+      ${isTextSelectable
+        ? 'user-select:text; -webkit-user-select:text;'
+        : 'user-select:none; -webkit-user-select:none;'}
       color:transparent; background:transparent;
     `;
 
