@@ -579,6 +579,21 @@ class Primework {
     return { fontStr:`${it}${wt} ${emPx}px ${fm}`, size:emPx, lineH, family:fm };
   }
   _build() {
+    // One-time, page-wide: the browser's default ::selection styling
+    // overrides color/background on selected text regardless of the
+    // element's own (transparent) color -- without this rule, actually
+    // selecting alias text reveals it as a real, visible, wrong-font ghost
+    // on top of the canvas-rendered text, since Primework draws its own
+    // selection highlight on canvas and the real DOM text is meant to stay
+    // fully invisible always, selected or not.
+    if (!document.getElementById('primework-selection-style')) {
+      const sel = document.createElement('style');
+      sel.id = 'primework-selection-style';
+      sel.textContent = '[data-canvas-id]::selection{background:transparent;color:transparent;}' +
+                         '[data-canvas-id]::-moz-selection{background:transparent;color:transparent;}';
+      document.head.appendChild(sel);
+    }
+
     const vp = this.viewport;
     // Set only required properties — never use cssText+= which overwrites existing
     // styles like position:fixed on full-screen viewport elements (black screen bug).
@@ -1426,9 +1441,22 @@ class Primework {
       originY = baseline - emAscPx;  // em-top y for textBaseline='top'
       maxW    = g.width - (s.paddingX || 0) * 2;
     } else if (type === 'link') {
-      originX = g.x;
-      originY = g.y;
-      maxW    = g.width;
+      originX = g.x + (s.paddingX || 0);
+      // Same cap-height optical centering as the actual render code (case
+      // 'link' in _drawNode), converted to a top-origin Y the same way
+      // button/badge do above -- otherwise selection highlights and
+      // click-to-character hit-testing land at literal g.y regardless of
+      // verticalAlign, out of sync with where the text is actually drawn.
+      this.ctx.textBaseline = 'top';
+      const emAscPxLink  = this.ctx.measureText('H').actualBoundingBoxDescent;
+      this.ctx.textBaseline = 'alphabetic';
+      const capAscPxLink = this.ctx.measureText('H').actualBoundingBoxAscent;
+      let linkBaseline = g.y + capAscPxLink;
+      if (s.verticalAlign === 'middle' && g.height > 0) {
+        linkBaseline = g.y + g.height / 2 + capAscPxLink / 2;
+      }
+      originY = linkBaseline - emAscPxLink;
+      maxW    = g.width - (s.paddingX || 0);
     } else {
       // Text blocks (paragraphs, headings, etc.)
       const li = s.leftIndent  || 0;
