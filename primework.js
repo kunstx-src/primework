@@ -1108,12 +1108,10 @@ class Primework {
   _onKeyDown(e) {
     // Ctrl/Cmd+C: copy canvas text selection to clipboard
     if ((e.ctrlKey || e.metaKey) && e.key === 'c' && this._textSel) {
-      const { nodeId, anchor, focus } = this._textSel;
-      const start = Math.min(anchor, focus), end = Math.max(anchor, focus);
-      if (start < end) {
-        const node = this.nodes.find(n => n.id === nodeId);
-        if (node?.content) {
-          const text = node.content.slice(start, end);
+      const r = this._selRange();
+      if (r && (r.startNodeId !== r.endNodeId || r.startIdx < r.endIdx)) {
+        const text = this._selectedText(r);
+        if (text) {
           if (navigator.clipboard?.writeText) {
             navigator.clipboard.writeText(text).catch(() => {});
           } else {
@@ -1230,6 +1228,57 @@ class Primework {
     return null;
   }
 
+  // ── Cross-node text selection ───────────────────────────────────────────────
+  // A selection's anchor and focus can each live in a DIFFERENT node (e.g.
+  // dragging across two adjacently-placed headings that are two separate
+  // colored nodes). Document order is taken from this.nodes array order,
+  // which always matches real DOM alias order (_syncAliases appends aliases
+  // in this.nodes order into htmlTop/htmlLayer/htmlBottom).
+  _findAlias(nodeId) {
+    return this.htmlTop.querySelector(`[data-canvas-id="${nodeId}"]`)
+        || this.htmlLayer.querySelector(`[data-canvas-id="${nodeId}"]`)
+        || this.htmlBottom.querySelector(`[data-canvas-id="${nodeId}"]`);
+  }
+
+  // Normalizes the current drag's anchor/focus into document-order
+  // start/end points, plus the this.nodes array-index span [loI,hiI]
+  // between them (inclusive) -- nodes strictly between loI and hiI are
+  // fully selected; the two endpoints are partially selected.
+  _selRange() {
+    const ts = this._textSel;
+    if (!ts) return null;
+    const ai = this.nodes.findIndex(n => n.id === ts.anchorNodeId);
+    const fi = this.nodes.findIndex(n => n.id === ts.focusNodeId);
+    if (ai < 0 || fi < 0) return null;
+    if (ai < fi || (ai === fi && ts.anchorIdx <= ts.focusIdx)) {
+      return { startNodeId:ts.anchorNodeId, startIdx:ts.anchorIdx,
+               endNodeId:ts.focusNodeId,     endIdx:ts.focusIdx, loI:ai, hiI:fi };
+    }
+    return { startNodeId:ts.focusNodeId,  startIdx:ts.focusIdx,
+             endNodeId:ts.anchorNodeId,   endIdx:ts.anchorIdx, loI:fi, hiI:ai };
+  }
+
+  // Assembles the selected text across every spanned node, in document
+  // order, joined with '\n' between nodes (matches how browsers join text
+  // copied across separate block-level elements).
+  _selectedText(r) {
+    if (r.startNodeId === r.endNodeId) {
+      const node = this.nodes.find(n => n.id === r.startNodeId);
+      if (!node?.content) return '';
+      const a = Math.min(r.startIdx, r.endIdx), b = Math.max(r.startIdx, r.endIdx);
+      return node.content.slice(a, b);
+    }
+    const parts = [];
+    for (let i = r.loI; i <= r.hiI; i++) {
+      const n = this.nodes[i];
+      if (!n || !(this._TEXT_TYPES.has(n.type) || n.textSelectable) || !n.content) continue;
+      if (n.id === r.startNodeId)      parts.push(n.content.slice(r.startIdx));
+      else if (n.id === r.endNodeId)   parts.push(n.content.slice(0, r.endIdx));
+      else                              parts.push(n.content);
+    }
+    return parts.join('\n');
+  }
+
   _onMouseDown(e) {
     // ── Scrollbar drag ──────────────────────────────────────────────────────
     // Works in both design and preview mode. Detects click in the rightmost
@@ -1277,7 +1326,7 @@ class Primework {
     e.preventDefault();
     this.viewport.focus({ preventScroll:true }); // give vp focus so Ctrl+C fires
     const ci = node.textSelectable && !node.content ? 0 : this._pixelToCharIdx(node, x, y);
-    this._textSel = { nodeId:node.id, anchor:ci, focus:ci, active:true };
+    this._textSel = { anchorNodeId:node.id, anchorIdx:ci, focusNodeId:node.id, focusIdx:ci, active:true };
     this._render();
   }
 
@@ -1297,8 +1346,18 @@ class Primework {
     }
     const { x, y } = this._coords(e);
     if (this._textSel?.active) {
-      const node = this.nodes.find(n=>n.id===this._textSel.nodeId);
-      if (node) { this._textSel.focus=this._pixelToCharIdx(node,x,y); this._render(); }
+      const hitNode = this._hitTest(x, y);
+      if (hitNode && (this._TEXT_TYPES.has(hitNode.type) || hitNode.textSelectable)) {
+        this._textSel.focusNodeId = hitNode.id;
+        this._textSel.focusIdx = hitNode.textSelectable && !hitNode.content ? 0 : this._pixelToCharIdx(hitNode, x, y);
+      } else {
+        // Cursor is over empty space / a non-text node -- keep extending
+        // within whichever node currently holds focus (its own geometry
+        // naturally clamps the result), rather than freezing outright.
+        const curNode = this.nodes.find(n => n.id === this._textSel.focusNodeId);
+        if (curNode) this._textSel.focusIdx = this._pixelToCharIdx(curNode, x, y);
+      }
+      this._render();
       return;
     }
     const node = this._hitTest(x, y);
@@ -1325,7 +1384,8 @@ class Primework {
     // Disabled nodes absorb the click but do nothing
     if (node?.disabled || this._nodeStyle(node || {})?.disabled) return;
     const isTextNode = node && (this._TEXT_TYPES.has(node.type) || node.textSelectable);
-    if (this._textSel && Math.abs(this._textSel.anchor-this._textSel.focus)>0) {
+    const _r = this._selRange();
+    if (_r && (_r.startNodeId !== _r.endNodeId || _r.startIdx !== _r.endIdx)) {
       if (!isTextNode) {
         // Clicking a non-text node: clear selection and fall through to onClick
         this._textSel = null;
@@ -1349,10 +1409,13 @@ class Primework {
     if (this._sbDragging) { this._sbDragging = false; return; }
     if (!this._textSel?.active) return;
     this._textSel.active = false;
-    const { nodeId, anchor, focus } = this._textSel;
-    const start=Math.min(anchor,focus), end=Math.max(anchor,focus);
-    if (start<end) this._syncBrowserSelection(nodeId,start,end);
-    else { this._textSel=null; window.getSelection()?.removeAllRanges(); }
+    const r = this._selRange();
+    if (r && (r.startNodeId !== r.endNodeId || r.startIdx < r.endIdx)) {
+      this._syncBrowserSelection(r.startNodeId, r.startIdx, r.endNodeId, r.endIdx);
+    } else {
+      this._textSel = null;
+      window.getSelection()?.removeAllRanges();
+    }
     this._render();
   }
 
@@ -1365,12 +1428,11 @@ class Primework {
 
   _onCopy(e) {
     if (!this._textSel) return;
-    const { nodeId, anchor, focus } = this._textSel;
-    const start=Math.min(anchor,focus), end=Math.max(anchor,focus);
-    if (start>=end) return;
-    const node = this.nodes.find(n=>n.id===nodeId);
-    if (!node?.content) return;
-    e.clipboardData.setData('text/plain', node.content.slice(start,end));
+    const r = this._selRange();
+    if (!r) return;
+    const text = this._selectedText(r);
+    if (!text) return;
+    e.clipboardData.setData('text/plain', text);
     e.preventDefault();
   }
 
@@ -1441,7 +1503,16 @@ class Primework {
       originY = baseline - emAscPx;  // em-top y for textBaseline='top'
       maxW    = g.width - (s.paddingX || 0) * 2;
     } else if (type === 'link') {
-      originX = g.x + (s.paddingX || 0);
+      // Mirrors the render code's hCentered check (case 'link' in _drawNode):
+      // a link with verticalAlign:'middle' + explicit width is a box/button-like
+      // control and centers its text horizontally instead of left-aligning.
+      const hCenteredLink = s.verticalAlign === 'middle' && node.constraints?.width != null;
+      if (hCenteredLink) {
+        const fullWLink = this.ctx.measureText(text).width;
+        originX = g.x + (g.width - fullWLink) / 2;
+      } else {
+        originX = g.x + (s.paddingX || 0);
+      }
       // Same cap-height optical centering as the actual render code (case
       // 'link' in _drawNode), converted to a top-origin Y the same way
       // button/badge do above -- otherwise selection highlights and
@@ -1456,7 +1527,7 @@ class Primework {
         linkBaseline = g.y + g.height / 2 + capAscPxLink / 2;
       }
       originY = linkBaseline - emAscPxLink;
-      maxW    = g.width - (s.paddingX || 0);
+      maxW    = hCenteredLink ? g.width : g.width - (s.paddingX || 0);
     } else {
       // Text blocks (paragraphs, headings, etc.)
       const li = s.leftIndent  || 0;
@@ -1506,9 +1577,22 @@ class Primework {
   }
 
   _drawTextSelection(node) {
-    if (!this._textSel || this._textSel.nodeId !== node.id) return;
-    const selA = Math.min(this._textSel.anchor, this._textSel.focus);
-    const selB = Math.max(this._textSel.anchor, this._textSel.focus);
+    const r = this._selRangeCache;
+    if (!r) return;
+    const ni = this.nodes.indexOf(node);
+    if (ni < r.loI || ni > r.hiI) return; // not part of this selection at all
+    let selA, selB;
+    if (r.startNodeId === r.endNodeId) {
+      selA = Math.min(r.startIdx, r.endIdx);
+      selB = Math.max(r.startIdx, r.endIdx);
+    } else if (node.id === r.startNodeId) {
+      selA = r.startIdx; selB = (node.content || '').length;
+    } else if (node.id === r.endNodeId) {
+      selA = 0; selB = r.endIdx;
+    } else {
+      // Strictly between the two endpoints in document order: fully selected.
+      selA = 0; selB = (node.content || '').length;
+    }
     if (selA >= selB) return;
 
     const { fontStr, originX, originY, lineH, lines } = this._textLayout(node);
@@ -1578,15 +1662,17 @@ class Primework {
     ctx.restore();
   }
 
-  _syncBrowserSelection(nodeId, start, end) {
-    const alias = this.htmlTop.querySelector(`[data-canvas-id="${nodeId}"]`) || this.htmlLayer.querySelector(`[data-canvas-id="${nodeId}"]`) || this.htmlBottom.querySelector(`[data-canvas-id="${nodeId}"]`);
-    if (!alias) return;
-    const tn = [...alias.childNodes].find(n=>n.nodeType===Node.TEXT_NODE);
-    if (!tn) return;
+  _syncBrowserSelection(startNodeId, startIdx, endNodeId, endIdx) {
+    const startAlias = this._findAlias(startNodeId);
+    const endAlias   = this._findAlias(endNodeId);
+    if (!startAlias || !endAlias) return;
+    const stn = [...startAlias.childNodes].find(n=>n.nodeType===Node.TEXT_NODE);
+    const etn = [...endAlias.childNodes].find(n=>n.nodeType===Node.TEXT_NODE);
+    if (!stn || !etn) return;
     try {
       const range=document.createRange();
-      range.setStart(tn, Math.min(start,tn.length));
-      range.setEnd(tn,   Math.min(end,  tn.length));
+      range.setStart(stn, Math.min(startIdx,stn.length));
+      range.setEnd(etn,   Math.min(endIdx,  etn.length));
       window.getSelection()?.removeAllRanges();
       window.getSelection()?.addRange(range);
     } catch(_) {}
@@ -1603,6 +1689,9 @@ class Primework {
     const { ctx, DOC_W, DOC_H } = this;
     ctx.clearRect(0,0,DOC_W,DOC_H);
     ctx.fillStyle = this.clearColor ?? '#ffffff'; ctx.fillRect(0,0,DOC_W,DOC_H);
+    // Computed once per frame, reused by every _drawTextSelection call below
+    // instead of each node re-deriving it independently.
+    this._selRangeCache = this._textSel ? this._selRange() : null;
 
     // Use cached zIndex sort; invalidated by add/update/remove via this._zDirty
     if (this._zDirty || !this._byZ) {
@@ -1765,7 +1854,22 @@ class Primework {
         }
 
         const lt = applyTx(content || '', ls.textTransform);
-        ctx.fillText(lt, g.x + (ls.paddingX || 0), linkBaselineY);
+
+        // A link with verticalAlign:'middle' AND an explicit width is being used
+        // as a box/button-like control (not an inline text link) -- center its
+        // text horizontally too, matching how button/badge center, instead of
+        // always left-aligning at g.x regardless of how much extra box width
+        // sits unused to the right.
+        const hCentered = ls.verticalAlign === 'middle' && node.constraints?.width != null;
+        let textX;
+        if (hCentered) {
+          ctx.textAlign = 'center';
+          textX = g.x + g.width / 2;
+        } else {
+          ctx.textAlign = 'start';
+          textX = g.x + (ls.paddingX || 0);
+        }
+        ctx.fillText(lt, textX, linkBaselineY);
 
         if (ls.underline || ls.textDecoration === 'underline') {
           // Underline sits at the baseline
@@ -1775,9 +1879,10 @@ class Primework {
           ctx.lineWidth   = ls.underlineWidth || 1;
           if (ls.underlineStyle === 'dashed')      ctx.setLineDash([4, 3]);
           else if (ls.underlineStyle === 'dotted') ctx.setLineDash([1, 2]);
+          const ulStartX = hCentered ? textX - Math.min(tw, g.width) / 2 : textX;
           ctx.beginPath();
-          ctx.moveTo(g.x + (ls.paddingX || 0), ulY);
-          ctx.lineTo(g.x + (ls.paddingX || 0) + Math.min(tw, g.width), ulY);
+          ctx.moveTo(ulStartX, ulY);
+          ctx.lineTo(ulStartX + Math.min(tw, g.width), ulY);
           ctx.stroke();
           ctx.setLineDash([]);
         }
