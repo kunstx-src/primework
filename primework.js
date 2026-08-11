@@ -54,7 +54,7 @@ const SD = {
 
     // Block
     background:null, paddingX:0, paddingY:0,
-    borderRadius:0, border:null, borderWidth:1, borderColor:'#e0e0e0',
+    borderRadius:0, border:null, borderWidth:0, borderColor:'#e0e0e0',
     shadow:false, shadowColor:'rgba(0,0,0,0.12)', shadowBlur:16, shadowOffsetY:4,
     leftIndent:0, rightIndent:0, opacity:1,
 
@@ -1716,6 +1716,7 @@ class Primework {
 
       case 'link': {
         const ls = this._nodeStyle(node, hov, false);
+        if (ls.background || ls.border || (ls.borderWidth && ls.borderColor)) this._drawSurface(g, ls);
         const { fontStr, size } = this._fontSpec(node, ls);
         ctx.save();
         ctx.font = fontStr;
