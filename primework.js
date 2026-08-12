@@ -632,6 +632,7 @@ class Primework {
 
     this.interactLayer = document.createElement('div');
     this.interactLayer.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;z-index:3;pointer-events:auto;';
+    this.interactLayer.setAttribute('aria-hidden', 'true'); // pure pointer-event capture surface, never holds content
 
     // Skip-navigation: invisible link that jumps keyboard focus to main content.
     // Becomes visible on focus (standard accessible pattern).
@@ -2288,6 +2289,15 @@ class Primework {
     this.htmlTop.appendChild(fragTop);
     this.htmlLayer.appendChild(frag);
     this.htmlBottom.appendChild(fragBot);
+    // htmlTop/htmlBottom hold real content only on pages using fixed nodes
+    // (a fixed nav, a fixed footer) -- on any page without them they're
+    // genuinely empty structural wrappers, which otherwise show up as
+    // meaningless "generic" nodes in the accessibility tree. Only hide them
+    // when they truly have nothing in them, never unconditionally -- doing
+    // so always would wrongly hide real navigation/footer content on pages
+    // that do use fixed elements.
+    this.htmlTop.setAttribute('aria-hidden', this.htmlTop.children.length === 0 ? 'true' : 'false');
+    this.htmlBottom.setAttribute('aria-hidden', this.htmlBottom.children.length === 0 ? 'true' : 'false');
     this._refreshAliases();
   }
 
