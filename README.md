@@ -210,13 +210,8 @@ Primework focuses on the areas where rendering quality becomes a feature rather 
 
 # Roadmap
 
-- [ ] Core rendering engine
-- [ ] Constraint layout engine
-- [ ] Typography engine
+
 - [ ] Component library
-- [ ] Editor tooling
-- [ ] Documentation
-- [ ] Examples
 - [ ] Plugin ecosystem
 
 ---
