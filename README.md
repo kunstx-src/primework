@@ -99,7 +99,7 @@ const pw = new Primework({ viewport, mode: 'overlay', clearColor: 'transparent' 
 
 ### Learn more
 
-- **[Full documentation](kunstx.online/primework/documentation.html)** — every element type, style property, and API, live and interactive.
+- **[Full documentation](https://kunstx.online/primework/documentation.html)** — every element type, style property, and API, live and interactive.
 - **[Website](https://kunstx.online/primework)** — Primework's own site, built with itself.
 - **[GitHub](https://github.com/kunstx-src/primework)** — source, issues, and releases.
 
