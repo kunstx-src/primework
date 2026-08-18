@@ -190,6 +190,13 @@ class FontMetrics {
   _at100(family, weight, ctx) {
     const key = `${weight}|${family}`;
     if (this._cache.has(key)) return this._cache.get(key);
+
+    // Real, parsed font-file metrics take priority when available (see
+    // FontFileMetrics above) -- falls through to the canvas heuristic below
+    // for any family that hasn't been (or can't be) loaded that way.
+    const real = FONT_FILE_METRICS.get(family);
+    if (real) { this._cache.set(key, real); return real; }
+
     ctx.save();
     ctx.font = `${weight} 100px ${family}`;
 
@@ -255,6 +262,85 @@ class FontMetrics {
 }
 
 const FONT_METRICS = new FontMetrics();
+
+// =============================================================================
+//  FONT FILE METRICS (optional) -- real, authored metrics read directly from
+//  a font's own binary data via opentype.js, instead of estimated from how
+//  the browser happens to rasterize a reference glyph on canvas.
+//
+//  Entirely opt-in. Has zero effect unless BOTH of the following are true:
+//  (1) opentype.js is loaded as window.opentype before this file runs, and
+//  (2) pw.loadFontMetrics(family, source) has been called and resolved for
+//  that family. Without either, every heightReference/spaceBeforeRef
+//  calculation falls back to the FontMetrics canvas heuristic above,
+//  exactly as before -- this can't break a page that doesn't opt in.
+//
+//  Why this exists: canvas measureText() reports how a specific browser's
+//  text engine rasterized a reference glyph -- real and useful, but
+//  downstream of that engine's own hinting/shaping, and can differ subtly
+//  across browsers and platforms. Parsing the font file's own OS/2 table
+//  reads the values the type designer (or their production tooling)
+//  actually declared, which are identical no matter which browser parses
+//  the same bytes.
+// =============================================================================
+class FontFileMetrics {
+  constructor() { this._byFamily = new Map(); }
+  set(family, ratios) { this._byFamily.set(family, ratios); }
+  // 'family' as seen by FontMetrics is often a full CSS font stack, e.g.
+  // "'Inter', system-ui, sans-serif" -- match against any registered name
+  // that appears in it, so callers can register just the family they loaded.
+  get(fullFamilyString) {
+    for (const [name, ratios] of this._byFamily) {
+      if (fullFamilyString.includes(name)) return ratios;
+    }
+    return null;
+  }
+}
+const FONT_FILE_METRICS = new FontFileMetrics();
+
+// Parses raw font bytes with opentype.js (if present) into the same ratio
+// shape FontMetrics._at100() produces, so the two are interchangeable.
+// Never throws -- returns null on any failure (missing opentype.js,
+// unparseable/corrupt bytes, WOFF2 without a decompressor, etc.), which is
+// deliberate: a bad font file should degrade to the canvas heuristic, not
+// break the page. Mirrors the same defensive shape as pdf-tooling that
+// treats real-metric parsing as a bonus, not a prerequisite for the font
+// being usable at all.
+function parseFontFileMetrics(arrayBuffer) {
+  if (typeof window === 'undefined' || !window.opentype) return null;
+  try {
+    const font = window.opentype.parse(arrayBuffer);
+    const upm  = font.unitsPerEm;
+    const os2  = font.tables?.os2;
+    const hhea = font.tables?.hhea;
+
+    // Declared OS/2 fields when present; otherwise measure the parsed
+    // glyph's own vector outline (still deterministic across browsers,
+    // since it's geometry from the parsed file, not browser rasterization)
+    // before finally falling back to a plausible ratio.
+    const glyphTop = (ch) => {
+      try {
+        const g  = font.charToGlyph(ch);
+        const bb = g?.getPath(0, 0, upm)?.getBoundingBox?.();
+        return (bb && bb.y2 > 0) ? bb.y2 : null;
+      } catch (_) { return null; }
+    };
+
+    const capHeight = (os2?.sCapHeight || glyphTop('H') || upm * 0.70) / upm;
+    const xHeight    = (os2?.sxHeight   || glyphTop('x') || upm * 0.50) / upm;
+    const emAscent   = (os2?.sTypoAscender ?? Math.round(upm * 0.80)) / upm;
+    const emDescent  = Math.abs(os2?.sTypoDescender ?? Math.round(upm * -0.20)) / upm;
+    // opentype.js has no distinct "lowercase ascender" field the way the
+    // canvas heuristic measures one directly off letters like b/d/h -- the
+    // hhea table's ascender is the closest authored equivalent.
+    const ascender = (hhea?.ascender ?? os2?.sTypoAscender ?? upm * 0.75) / upm;
+
+    return { capHeight, xHeight, ascender, descender: emDescent, emAscent, emDescent };
+  } catch (e) {
+    console.warn('Primework: could not parse font file for real metrics (falling back to the canvas heuristic):', e);
+    return null;
+  }
+}
 
 // =============================================================================
 //  STYLE REGISTRY
@@ -2973,6 +3059,43 @@ Primework.prototype.findNode = function(id) {
 // e.g. pw.queryNodes(n => n.type === 'button' && !n.disabled)
 Primework.prototype.queryNodes = function(fn) {
   return this.nodes.filter(fn);
+};
+
+// pw.loadFontMetrics(family, source) -- parse a font file's own OS/2 table
+// for real, authored cap-height/x-height/ascender/descender instead of
+// estimating them from how the browser rasterizes a reference glyph.
+// `source` is a URL string (fetched here) or an ArrayBuffer you already
+// have. Requires opentype.js loaded as window.opentype BEFORE calling this.
+// Note: opentype.js cannot parse WOFF2 without an external decompressor --
+// use a TTF/OTF copy of the font for this call specifically (it can still
+// be a completely different, WOFF2, file that you actually render/@font-face
+// with; this call is only about reading metrics, not about what gets drawn).
+// Silently resolves false if opentype.js isn't present or the font can't be
+// parsed -- every heightReference/spaceBeforeRef calculation keeps working
+// via the canvas-heuristic fallback either way; this only makes it more
+// precise when it succeeds.
+Primework.prototype.loadFontMetrics = async function(family, source) {
+  if (typeof window === 'undefined' || !window.opentype) {
+    console.warn(`Primework.loadFontMetrics('${family}'): opentype.js not found on window -- ` +
+                 `load it (e.g. <script src="opentype.min.js">) before calling this. Falling back to the canvas heuristic.`);
+    return false;
+  }
+  try {
+    const buf = (source instanceof ArrayBuffer) ? source : await (await fetch(source)).arrayBuffer();
+    const ratios = parseFontFileMetrics(buf);
+    if (!ratios) return false;
+    FONT_FILE_METRICS.set(family, ratios);
+    // Clear the whole cache (simple and safe -- this only runs when metrics
+    // load, never in a render hot path) so the next render picks up the
+    // real numbers, then re-render now in case nodes using this family
+    // were already laid out against the canvas-heuristic estimate.
+    FONT_METRICS._cache.clear();
+    if (this.nodes.length) { this._relayout(); this._computeMaxScroll(); this._render(); this._syncAliases(); }
+    return true;
+  } catch (e) {
+    console.warn(`Primework.loadFontMetrics('${family}'): failed to load/parse —`, e, '— falling back to the canvas heuristic.');
+    return false;
+  }
 };
 
 Primework.prototype.startAnimating = function(fps = 60) {
