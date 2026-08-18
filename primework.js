@@ -194,7 +194,7 @@ class FontMetrics {
     // Real, parsed font-file metrics take priority when available (see
     // FontFileMetrics above) -- falls through to the canvas heuristic below
     // for any family that hasn't been (or can't be) loaded that way.
-    const real = FONT_FILE_METRICS.get(family);
+    const real = FONT_FILE_METRICS.get(family, weight);
     if (real) { this._cache.set(key, real); return real; }
 
     ctx.save();
@@ -284,13 +284,25 @@ const FONT_METRICS = new FontMetrics();
 //  the same bytes.
 // =============================================================================
 class FontFileMetrics {
-  constructor() { this._byFamily = new Map(); }
-  set(family, ratios) { this._byFamily.set(family, ratios); }
+  constructor() { this._byKey = new Map(); this._byFamilyAnyWeight = new Map(); }
+  // weight is optional: pass it to register metrics for one specific weight
+  // of a family (font files genuinely can differ, even though well-behaved
+  // families usually don't); omit it to register a fallback that applies to
+  // any weight of that family that hasn't been registered more specifically.
+  set(family, weight, ratios) {
+    if (weight != null) this._byKey.set(`${weight}|${family}`, ratios);
+    else this._byFamilyAnyWeight.set(family, ratios);
+  }
   // 'family' as seen by FontMetrics is often a full CSS font stack, e.g.
   // "'Inter', system-ui, sans-serif" -- match against any registered name
   // that appears in it, so callers can register just the family they loaded.
-  get(fullFamilyString) {
-    for (const [name, ratios] of this._byFamily) {
+  get(fullFamilyString, weight) {
+    for (const [key, ratios] of this._byKey) {
+      const sep = key.indexOf('|');
+      const w = key.slice(0, sep), name = key.slice(sep + 1);
+      if (w === String(weight) && fullFamilyString.includes(name)) return ratios;
+    }
+    for (const [name, ratios] of this._byFamilyAnyWeight) {
       if (fullFamilyString.includes(name)) return ratios;
     }
     return null;
@@ -303,9 +315,41 @@ const FONT_FILE_METRICS = new FontFileMetrics();
 // Never throws -- returns null on any failure (missing opentype.js,
 // unparseable/corrupt bytes, WOFF2 without a decompressor, etc.), which is
 // deliberate: a bad font file should degrade to the canvas heuristic, not
-// break the page. Mirrors the same defensive shape as pdf-tooling that
-// treats real-metric parsing as a bonus, not a prerequisite for the font
-// being usable at all.
+// break the page.
+//
+// Ascender/descender specifically have three independent, not-necessarily-
+// agreeing sources in a font file -- hhea (legacy, historically what many
+// renderers defaulted to), OS/2 sTypoAscender/Descender (the metrics OpenType
+// actually intends for line-spacing), and OS/2 usWinAscent/Descent (meant for
+// Windows' glyph-clipping region, and commonly inflated beyond the true
+// typographic value to leave room for accents). The font itself can name
+// which one it wants used: OS/2.fsSelection bit 7 (USE_TYPO_METRICS) is the
+// spec-sanctioned signal to prefer sTypo over the other two. That flag is
+// checked first here, before falling through hhea, then sTypo again
+// (defensive, in case hhea is somehow absent), then usWin only as a last
+// resort. Known gap: variable fonts can vary these values by weight/width
+// axis position via an MVAR table -- opentype.js does not parse MVAR at all
+// (confirmed directly in its source), so that per-instance variation isn't
+// visible here even when a font file defines it.
+function resolveAscDesc(os2, hhea, upm) {
+  const useTypoMetrics = !!(os2?.fsSelection & 0x80); // bit 7
+  if (useTypoMetrics && os2?.sTypoAscender != null) {
+    return { ascent: os2.sTypoAscender, descent: Math.abs(os2.sTypoDescender), source: 'sTypo (font sets USE_TYPO_METRICS)' };
+  }
+  if (hhea?.ascender != null) {
+    return { ascent: hhea.ascender, descent: Math.abs(hhea.descender), source: 'hhea' };
+  }
+  if (os2?.sTypoAscender != null) {
+    return { ascent: os2.sTypoAscender, descent: Math.abs(os2.sTypoDescender), source: 'sTypo (hhea missing)' };
+  }
+  if (os2?.usWinAscent != null) {
+    // Last resort -- usWin commonly overstates true line height, since it's
+    // sized for glyph-clipping safety, not typesetting.
+    return { ascent: os2.usWinAscent, descent: os2.usWinDescent, source: 'usWin (least preferred -- clipping metric, not typesetting)' };
+  }
+  return { ascent: upm * 0.80, descent: upm * 0.20, source: 'plausible ratio (no usable field found)' };
+}
+
 function parseFontFileMetrics(arrayBuffer) {
   if (typeof window === 'undefined' || !window.opentype) return null;
   try {
@@ -313,6 +357,7 @@ function parseFontFileMetrics(arrayBuffer) {
     const upm  = font.unitsPerEm;
     const os2  = font.tables?.os2;
     const hhea = font.tables?.hhea;
+    const post = font.tables?.post;
 
     // Declared OS/2 fields when present; otherwise measure the parsed
     // glyph's own vector outline (still deterministic across browsers,
@@ -328,14 +373,31 @@ function parseFontFileMetrics(arrayBuffer) {
 
     const capHeight = (os2?.sCapHeight || glyphTop('H') || upm * 0.70) / upm;
     const xHeight    = (os2?.sxHeight   || glyphTop('x') || upm * 0.50) / upm;
-    const emAscent   = (os2?.sTypoAscender ?? Math.round(upm * 0.80)) / upm;
-    const emDescent  = Math.abs(os2?.sTypoDescender ?? Math.round(upm * -0.20)) / upm;
-    // opentype.js has no distinct "lowercase ascender" field the way the
-    // canvas heuristic measures one directly off letters like b/d/h -- the
-    // hhea table's ascender is the closest authored equivalent.
-    const ascender = (hhea?.ascender ?? os2?.sTypoAscender ?? upm * 0.75) / upm;
 
-    return { capHeight, xHeight, ascender, descender: emDescent, emAscent, emDescent };
+    const ad = resolveAscDesc(os2, hhea, upm);
+    const emAscent  = ad.ascent  / upm;
+    const emDescent = ad.descent / upm;
+    // No distinct "lowercase ascender" field exists the way the canvas
+    // heuristic measures one directly off letters like b/d/h -- hhea.ascender
+    // (or the same resolved value used above) is the closest authored
+    // equivalent, since it's meant to represent the same typographic line.
+    const ascender = (hhea?.ascender ?? ad.ascent) / upm;
+
+    // Underline and strikethrough: Primework's underline/strikethrough
+    // features currently fall back to guessed positions (underlineOffset
+    // defaults to a flat 2px; strikethrough defaults to an x-height
+    // midpoint estimate) when a font declares real values for both. post
+    // (underline) and OS/2 (strikeout) carry them directly.
+    const underlinePosition  = post?.underlinePosition  != null ? post.underlinePosition  / upm : null;
+    const underlineThickness = post?.underlineThickness != null ? post.underlineThickness / upm : null;
+    const strikeoutPosition  = os2?.yStrikeoutPosition  != null ? os2.yStrikeoutPosition  / upm : null;
+    const strikeoutThickness = os2?.yStrikeoutSize       != null ? os2.yStrikeoutSize       / upm : null;
+
+    return {
+      capHeight, xHeight, ascender, descender: emDescent, emAscent, emDescent,
+      underlinePosition, underlineThickness, strikeoutPosition, strikeoutThickness,
+      _ascDescSource: ad.source, // exposed for debugging/inspection, not used in layout math
+    };
   } catch (e) {
     console.warn('Primework: could not parse font file for real metrics (falling back to the canvas heuristic):', e);
     return null;
@@ -3061,11 +3123,18 @@ Primework.prototype.queryNodes = function(fn) {
   return this.nodes.filter(fn);
 };
 
-// pw.loadFontMetrics(family, source) -- parse a font file's own OS/2 table
-// for real, authored cap-height/x-height/ascender/descender instead of
-// estimating them from how the browser rasterizes a reference glyph.
+// pw.loadFontMetrics(family, source, weight?) -- parse a font file's own
+// OS/2/hhea/post tables for real, authored cap-height/x-height/ascender/
+// descender/underline/strikeout metrics instead of estimating them from how
+// the browser rasterizes a reference glyph.
 // `source` is a URL string (fetched here) or an ArrayBuffer you already
 // have. Requires opentype.js loaded as window.opentype BEFORE calling this.
+// `weight` is optional: pass the CSS weight this specific file represents
+// (e.g. '700') to register it for that weight only -- font files within a
+// family CAN carry different metrics, even though well-built families
+// usually don't. Omit it to register these metrics as the fallback for any
+// weight of the family that hasn't been registered more specifically; a
+// later call with an explicit weight always takes priority over it.
 // Note: opentype.js cannot parse WOFF2 without an external decompressor --
 // use a TTF/OTF copy of the font for this call specifically (it can still
 // be a completely different, WOFF2, file that you actually render/@font-face
@@ -3074,7 +3143,7 @@ Primework.prototype.queryNodes = function(fn) {
 // parsed -- every heightReference/spaceBeforeRef calculation keeps working
 // via the canvas-heuristic fallback either way; this only makes it more
 // precise when it succeeds.
-Primework.prototype.loadFontMetrics = async function(family, source) {
+Primework.prototype.loadFontMetrics = async function(family, source, weight = null) {
   if (typeof window === 'undefined' || !window.opentype) {
     console.warn(`Primework.loadFontMetrics('${family}'): opentype.js not found on window -- ` +
                  `load it (e.g. <script src="opentype.min.js">) before calling this. Falling back to the canvas heuristic.`);
@@ -3084,7 +3153,7 @@ Primework.prototype.loadFontMetrics = async function(family, source) {
     const buf = (source instanceof ArrayBuffer) ? source : await (await fetch(source)).arrayBuffer();
     const ratios = parseFontFileMetrics(buf);
     if (!ratios) return false;
-    FONT_FILE_METRICS.set(family, ratios);
+    FONT_FILE_METRICS.set(family, weight, ratios);
     // Clear the whole cache (simple and safe -- this only runs when metrics
     // load, never in a render hot path) so the next render picks up the
     // real numbers, then re-render now in case nodes using this family
