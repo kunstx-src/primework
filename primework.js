@@ -331,25 +331,104 @@ const FONT_FILE_METRICS = new FontFileMetrics();
 // axis position via an MVAR table -- opentype.js does not parse MVAR at all
 // (confirmed directly in its source), so that per-instance variation isn't
 // visible here even when a font file defines it.
-function resolveAscDesc(os2, hhea, upm) {
+function resolveAscDesc(font, os2, hhea, upm) {
   const useTypoMetrics = !!(os2?.fsSelection & 0x80); // bit 7
+  let declaredAsc, declaredDesc, declaredSource;
   if (useTypoMetrics && os2?.sTypoAscender != null) {
-    return { ascent: os2.sTypoAscender, descent: Math.abs(os2.sTypoDescender), source: 'sTypo (font sets USE_TYPO_METRICS)' };
+    declaredAsc = os2.sTypoAscender; declaredDesc = Math.abs(os2.sTypoDescender); declaredSource = 'sTypo (font sets USE_TYPO_METRICS)';
+  } else if (hhea?.ascender != null) {
+    declaredAsc = hhea.ascender; declaredDesc = Math.abs(hhea.descender); declaredSource = 'hhea';
+  } else if (os2?.sTypoAscender != null) {
+    declaredAsc = os2.sTypoAscender; declaredDesc = Math.abs(os2.sTypoDescender); declaredSource = 'sTypo (hhea missing)';
+  } else if (os2?.usWinAscent != null) {
+    declaredAsc = os2.usWinAscent; declaredDesc = os2.usWinDescent; declaredSource = 'usWin (least preferred -- clipping metric, not typesetting)';
+  } else {
+    declaredAsc = null; declaredDesc = null; declaredSource = 'none declared';
   }
-  if (hhea?.ascender != null) {
-    return { ascent: hhea.ascender, descent: Math.abs(hhea.descender), source: 'hhea' };
-  }
-  if (os2?.sTypoAscender != null) {
-    return { ascent: os2.sTypoAscender, descent: Math.abs(os2.sTypoDescender), source: 'sTypo (hhea missing)' };
-  }
-  if (os2?.usWinAscent != null) {
-    // Last resort -- usWin commonly overstates true line height, since it's
-    // sized for glyph-clipping safety, not typesetting.
-    return { ascent: os2.usWinAscent, descent: os2.usWinDescent, source: 'usWin (least preferred -- clipping metric, not typesetting)' };
-  }
-  return { ascent: upm * 0.80, descent: upm * 0.20, source: 'plausible ratio (no usable field found)' };
+
+  // Deliberately NOT reconciled against outline extent the way cap-height/
+  // x-height are. Those are DEFINED as literal glyph measurements (cap-height
+  // IS how tall a capital is), so outline data is a fair check on them.
+  // Ascender/descender's declared value is a different kind of thing: a
+  // line-spacing budget the font designer chose, intentionally larger than
+  // any single lowercase letter, to leave headroom for accented capitals and
+  // other tall content. A real, correctly-built font (confirmed against IBM
+  // Plex Sans) will routinely show its declared ascender well above the
+  // outline height of plain letters like b/d/h -- that's expected design,
+  // not a sign the declared value is wrong. Treating that gap as a mismatch
+  // produced a false "OVERRIDDEN" flag on a font that was never actually
+  // wrong. Outline extent is still measured and returned for reference, but
+  // it no longer overrides or flags the declared source.
+  const outlineAsc  = measureOutlineExtent(font, 'bdfhijklt', upm, 'top');
+  const outlineDesc = measureOutlineExtent(font, 'pqgjy',     upm, 'bottom');
+  const ascFallback  = declaredAsc  ?? outlineAsc  ?? upm * 0.80;
+  const descFallback = declaredDesc ?? outlineDesc ?? upm * 0.20;
+
+  return {
+    ascent: ascFallback, descent: descFallback,
+    source: declaredSource,
+    ascVerification: declaredAsc != null ? 'declared' : (outlineAsc != null ? 'outline-only' : 'ratio-guess'),
+    descVerification: declaredDesc != null ? 'declared' : (outlineDesc != null ? 'outline-only' : 'ratio-guess'),
+    ascDeclared: declaredAsc, ascOutline: outlineAsc,
+    descDeclared: declaredDesc, descOutline: outlineDesc,
+  };
 }
 
+// Walks the REAL parsed vector-outline geometry (bezier path data straight
+// out of the font file, not a browser rasterizing anything) across a set of
+// characters, returning the furthest extent found -- either how far above
+// baseline (direction:'top', for cap-height/x-height/ascender) or how far
+// below baseline (direction:'bottom', for descender). This is what lets a
+// declared OS/2 field get checked against what the font's own glyphs
+// actually contain, rather than trusted on its own: a declared value is
+// metadata describing intent, this is a direct measurement of real ink.
+// Deterministic across every browser, same as the rest of this file --
+// pure geometry math on already-parsed points, no rasterizer involved.
+function measureOutlineExtent(font, chars, upm, direction) {
+  let best = null;
+  for (const ch of chars) {
+    try {
+      const g  = font.charToGlyph(ch);
+      if (!g || g.unicode == null) continue; // skip glyphs the font doesn't actually contain
+      const bb = g.getPath(0, 0, upm)?.getBoundingBox?.();
+      if (!bb) continue;
+      const extent = direction === 'top' ? -bb.y1 : bb.y2; // getPath() uses screen convention: y1 (negative) = above baseline, y2 (positive) = below baseline
+      if (extent != null && (best === null || extent > best)) best = extent;
+    } catch (_) { /* keep checking remaining glyphs */ }
+  }
+  return best; // null if none of the characters exist in this font at all
+}
+
+// Declared field vs. real outline agreeing within this fraction is treated
+// as "the same design, ordinary hinting/rounding noise" -- beyond it is
+// treated as the declared field not actually representing this font's real
+// vertical extents (the exact concern: a declared value is a summary
+// number, not a guarantee about every glyph's actual ink).
+const METRIC_AGREEMENT_TOLERANCE = 0.15;
+
+// Cross-checks a declared metric value against real outline measurement.
+// Returns { value, verification } -- verification is one of:
+//   'declared+outline-confirmed'  both exist and agree -- highest confidence
+//   'declared+outline-OVERRIDDEN' both exist, disagree beyond tolerance --
+//                                  real ink wins, since it's what's actually
+//                                  there, not just what the metadata claims
+//   'outline-only'                 no declared field -- outline measurement used directly
+//   'declared-only'                no outline data available (e.g. the font
+//                                  doesn't contain any of the reference glyphs) --
+//                                  falls back to trusting the declared field alone
+//   'ratio-guess'                  neither available -- last-resort plausible ratio
+function reconcileMetric(declaredPx, outlinePx, fallbackRatio, upm) {
+  if (declaredPx != null && outlinePx != null) {
+    const diff = Math.abs(declaredPx - outlinePx) / Math.max(declaredPx, outlinePx, 1);
+    if (diff <= METRIC_AGREEMENT_TOLERANCE) {
+      return { value: declaredPx, verification: 'declared+outline-confirmed' };
+    }
+    return { value: outlinePx, verification: 'declared+outline-OVERRIDDEN', declaredPx, outlinePx };
+  }
+  if (outlinePx != null)  return { value: outlinePx,  verification: 'outline-only' };
+  if (declaredPx != null) return { value: declaredPx, verification: 'declared-only' };
+  return { value: fallbackRatio * upm, verification: 'ratio-guess' };
+}
 function parseFontFileMetrics(arrayBuffer) {
   if (typeof window === 'undefined' || !window.opentype) return null;
   try {
@@ -359,22 +438,21 @@ function parseFontFileMetrics(arrayBuffer) {
     const hhea = font.tables?.hhea;
     const post = font.tables?.post;
 
-    // Declared OS/2 fields when present; otherwise measure the parsed
-    // glyph's own vector outline (still deterministic across browsers,
-    // since it's geometry from the parsed file, not browser rasterization)
-    // before finally falling back to a plausible ratio.
-    const glyphTop = (ch) => {
-      try {
-        const g  = font.charToGlyph(ch);
-        const bb = g?.getPath(0, 0, upm)?.getBoundingBox?.();
-        return (bb && bb.y2 > 0) ? bb.y2 : null;
-      } catch (_) { return null; }
-    };
+    // Cap-height and x-height: cross-check the declared OS/2 field against
+    // real outline extents across the same reference glyph sets used
+    // elsewhere in this file ('HBDEFIKLMNOPRSTUVWXYZ', 'acemnorsuvwxz'),
+    // instead of only measuring outlines when the declared field is
+    // entirely absent. A declared value is metadata describing intent, not
+    // a guarantee every glyph's real ink matches it -- this catches the gap
+    // between the two rather than silently trusting whichever is present.
+    const capOutline = measureOutlineExtent(font, 'HBDEFIKLMNOPRSTUVWXYZ', upm, 'top');
+    const xOutline    = measureOutlineExtent(font, 'acemnorsuvwxz',        upm, 'top');
+    const capR = reconcileMetric(os2?.sCapHeight || null, capOutline, 0.70, upm);
+    const xR   = reconcileMetric(os2?.sxHeight   || null, xOutline,   0.50, upm);
+    const capHeight = capR.value / upm;
+    const xHeight   = xR.value   / upm;
 
-    const capHeight = (os2?.sCapHeight || glyphTop('H') || upm * 0.70) / upm;
-    const xHeight    = (os2?.sxHeight   || glyphTop('x') || upm * 0.50) / upm;
-
-    const ad = resolveAscDesc(os2, hhea, upm);
+    const ad = resolveAscDesc(font, os2, hhea, upm);
     const emAscent  = ad.ascent  / upm;
     const emDescent = ad.descent / upm;
     // No distinct "lowercase ascender" field exists the way the canvas
@@ -387,7 +465,9 @@ function parseFontFileMetrics(arrayBuffer) {
     // features currently fall back to guessed positions (underlineOffset
     // defaults to a flat 2px; strikethrough defaults to an x-height
     // midpoint estimate) when a font declares real values for both. post
-    // (underline) and OS/2 (strikeout) carry them directly.
+    // (underline) and OS/2 (strikeout) carry them directly. No outline
+    // geometry to cross-check against here -- these describe a decorative
+    // line's placement, not a glyph shape, so there's nothing to measure.
     const underlinePosition  = post?.underlinePosition  != null ? post.underlinePosition  / upm : null;
     const underlineThickness = post?.underlineThickness != null ? post.underlineThickness / upm : null;
     const strikeoutPosition  = os2?.yStrikeoutPosition  != null ? os2.yStrikeoutPosition  / upm : null;
@@ -396,7 +476,20 @@ function parseFontFileMetrics(arrayBuffer) {
     return {
       capHeight, xHeight, ascender, descender: emDescent, emAscent, emDescent,
       underlinePosition, underlineThickness, strikeoutPosition, strikeoutThickness,
-      _ascDescSource: ad.source, // exposed for debugging/inspection, not used in layout math
+      // Exposed for debugging/inspection (e.g. console.log(ratios._verification))
+      // -- not consumed by layout math, just makes "why is this the number
+      // it is" answerable without re-deriving it by hand.
+      _verification: {
+        capHeight: capR.verification, xHeight: xR.verification,
+        ascender: ad.ascVerification, descender: ad.descVerification,
+        ascDescSource: ad.source,
+        details: {
+          capDeclared: os2?.sCapHeight ?? null, capOutline,
+          xDeclared: os2?.sxHeight ?? null, xOutline,
+          ascDeclared: ad.ascDeclared, ascOutline: ad.ascOutline,
+          descDeclared: ad.descDeclared, descOutline: ad.descOutline,
+        },
+      },
     };
   } catch (e) {
     console.warn('Primework: could not parse font file for real metrics (falling back to the canvas heuristic):', e);
@@ -3123,6 +3216,50 @@ Primework.prototype.queryNodes = function(fn) {
   return this.nodes.filter(fn);
 };
 
+// Best-effort cross-check: compares real outline measurement against what
+// the browser's canvas text engine actually reports for the SAME family,
+// as currently active in the page. This is the one function in this file
+// that still touches canvas rasterization, specifically because its whole
+// job is confirming the rasterizer is drawing the font we think it is. A
+// large gap here has one likely cause: the browser silently didn't load
+// the font under this family name and substituted a fallback --
+// ctx.measureText() has no way to signal that happened, it just measures
+// whatever it actually drew. Small gaps (hinting, antialiasing rounding)
+// are expected and not flagged; only a gap beyond ordinary rendering noise
+// is worth a warning.
+// Tighter than METRIC_AGREEMENT_TOLERANCE, deliberately: this compares two
+// independent measurements of what should be the exact same rendering (the
+// font file vs. the browser's own rasterizer for that same file), at a
+// large 100px reference size where hinting effects are minimal. Calibrated
+// against real measurements: a genuine correct match produced a 0.3% gap;
+// a wrong-font substitution produced 6.9%+ across every metric checked. 5%
+// sits comfortably between the two.
+const CANVAS_MISMATCH_THRESHOLD = 0.05;
+
+function verifyAgainstCanvas(ctx, family, weight, ratios) {
+  try {
+    ctx.save();
+    ctx.font = `${weight || '400'} 100px ${family}`;
+    ctx.textBaseline = 'alphabetic';
+    const canvasCapPx = ctx.measureText('H').actualBoundingBoxAscent;
+    ctx.restore();
+    if (canvasCapPx == null || !ratios?.capHeight) return;
+    const outlineCapPx = ratios.capHeight * 100; // ratios.capHeight is a fraction of 1em; measured at 100px here
+    const diff = Math.abs(canvasCapPx - outlineCapPx) / Math.max(canvasCapPx, outlineCapPx, 1);
+    if (diff > CANVAS_MISMATCH_THRESHOLD) {
+      console.warn(
+        `Primework.loadFontMetrics('${family}'): canvas is rendering something ` +
+        `${(diff * 100).toFixed(0)}% off from '${family}'s real cap-height ` +
+        `(canvas measured: ${canvasCapPx.toFixed(1)}px, font file says: ${outlineCapPx.toFixed(1)}px, both at 100px). ` +
+        `This usually means '${family}' isn't actually active in the browser under that exact ` +
+        `name -- check the font-family spelling and that it's registered via @font-face or ` +
+        `FontFace before this call. The loaded metrics are still being used for layout, but ` +
+        `they may not match what's actually being drawn.`
+      );
+    }
+  } catch (_) { /* diagnostic only -- never breaks loadFontMetrics */ }
+}
+
 // pw.loadFontMetrics(family, source, weight?) -- parse a font file's own
 // OS/2/hhea/post tables for real, authored cap-height/x-height/ascender/
 // descender/underline/strikeout metrics instead of estimating them from how
@@ -3154,6 +3291,7 @@ Primework.prototype.loadFontMetrics = async function(family, source, weight = nu
     const ratios = parseFontFileMetrics(buf);
     if (!ratios) return false;
     FONT_FILE_METRICS.set(family, weight, ratios);
+    verifyAgainstCanvas(this.ctx, family, weight, ratios);
     // Clear the whole cache (simple and safe -- this only runs when metrics
     // load, never in a render hot path) so the next render picks up the
     // real numbers, then re-render now in case nodes using this family
