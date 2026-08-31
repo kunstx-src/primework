@@ -3216,6 +3216,46 @@ Primework.prototype.queryNodes = function(fn) {
   return this.nodes.filter(fn);
 };
 
+// pw.exportLayout() — resolved pixel geometry for every addressable node,
+// keyed by id: { [id]: { x, y, width, height, fixed, zIndex } }
+//
+// Coordinates are in DOCUMENT space — the same space _g is computed in —
+// not viewport/screen space. Scroll offset is applied at draw time only
+// (see _drawNode's scrollOff) and is never baked into these numbers, so a
+// node's exported (x, y) does not change as the user scrolls. This is the
+// intended contract for anything that reproduces layout elsewhere (e.g. a
+// device player rendering from a scene description): it should get the
+// same document coordinates PrimeWork resolved, regardless of what part of
+// the page happened to be scrolled into view when this was called.
+// If you need on-screen position instead (rare — most consumers want
+// document space), subtract pw.scrollY yourself for non-fixed nodes.
+//
+// Only reflects the most recently *completed* relayout pass. add()/addAll()/
+// _onResize() all call _relayout() and then onChange(nodes) — onChange is
+// the reliable "layout is fresh" signal. Prefer calling exportLayout() from
+// inside onChange over calling it right after add() in the same tick,
+// especially when batching multiple add() calls.
+//
+// This method — its name and the shape of each entry — is a stable public
+// contract. Internal fields (_g and friends) are not: they may be renamed
+// or restructured without notice. Use exportLayout(), not node._g, from
+// outside this file.
+Primework.prototype.exportLayout = function() {
+  const out = {};
+  for (const node of this.nodes) {
+    if (!node._g || !node.id) continue; // not yet laid out, or unaddressable
+    out[node.id] = {
+      x:      node._g.x,
+      y:      node._g.y,
+      width:  node._g.width,
+      height: node._g.height,
+      fixed:  !!node.fixed,
+      zIndex: node.zIndex || 0,
+    };
+  }
+  return out;
+};
+
 // Best-effort cross-check: compares real outline measurement against what
 // the browser's canvas text engine actually reports for the SAME family,
 // as currently active in the page. This is the one function in this file
