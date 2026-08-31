@@ -1613,11 +1613,24 @@ class Primework {
       // per-node onHover(true) on the newly hovered node
       node?.onHover?.({ node, hovered:true });
     }
-    // pointer > text > default — buttons/links always pointer regardless of TEXT_TYPES membership
-    const isPointer = node && (node.type==='button'||node.type==='link'||node.type==='badge'
-                               || node?.cursor==='pointer');
-    const isText    = node && !isPointer && (this._TEXT_TYPES.has(node.type) || node.textSelectable);
-    this.interactLayer.style.cursor = isPointer ? 'pointer' : isText ? 'text' : 'default';
+    // pointer > not-allowed > text > default. Resolve the node's actual
+    // computed style (design token + styleName + node.style overrides) —
+    // don't read node.cursor directly, since authors set cursor via
+    // style:{cursor:'pointer'} like any other style property, not as a
+    // raw top-level field. This is also what makes disabled state work:
+    // SD_DISABLED tokens set cursor:'not-allowed' in the resolved style,
+    // which a raw-field check would never see.
+    const resolvedCursor = node ? this._nodeStyle(node).cursor : null;
+    const isNotAllowed = node && resolvedCursor === 'not-allowed';
+    const isPointer = node && !isNotAllowed &&
+      (resolvedCursor === 'pointer' || node.type==='button' || node.type==='link' || node.type==='badge');
+    const isText = node && !isPointer && !isNotAllowed &&
+      (this._TEXT_TYPES.has(node.type) || node.textSelectable);
+    this.interactLayer.style.cursor =
+      isNotAllowed ? 'not-allowed' :
+      isPointer    ? 'pointer' :
+      isText       ? 'text' :
+      (resolvedCursor && resolvedCursor !== 'auto') ? resolvedCursor : 'default';
   }
 
   _onClick(e) {
