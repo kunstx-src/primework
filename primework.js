@@ -74,6 +74,16 @@ const SD = {
     spaceBeforeRef: null,
     // Which typographic line spaceAfter measures FROM on the current element.
     spaceAfterRef:  null,
+    // Per-style override for where THIS element's own text baseline sits
+    // relative to its top edge (used directly in _drawTextBlock, distinct
+    // from spaceBeforeRef/spaceAfterRef above which govern the GAP between
+    // two different elements). null = use the project-wide topReference
+    // config. Was read (s.alignTo) throughout the rendering code but never
+    // actually declared here, unlike every other style property — meaning
+    // it worked correctly if you already knew the property existed, but
+    // wasn't discoverable at all by reading the style schema itself.
+    // 'top' | 'cap' | 'x' | 'ascender' | 'alphabetic'
+    alignTo: null,
 
     // ── Tracking / optical margin ──────────────────────────────────────────
     charSpace:     null,   // null = project config; em units
@@ -780,6 +790,28 @@ class Primework {
   //   styleName: 'primary'          -- class name (short form)
   //   style:     'primary'          -- same, backward compat
   //   style:     { size:14, … }     -- inline overrides (always merged last)
+  // firstOfTypeStyle/lastOfTypeStyle: when the resolved style names another
+  // style AND this node is the first (or last) node of its type among
+  // this.nodes (see _typeFirstLast, computed once per _relayout), re-
+  // resolve using that named style instead, merged UNDER this node's own
+  // resolved style — so the node's own inline overrides (node.style)
+  // still win, but any tag-type-level default now yields to the special-
+  // position style for whatever it doesn't itself override. First takes
+  // priority over last when a node is somehow both (only one node of that
+  // type exists) — matches the equivalent pubsuite convention.
+  _applyFirstLastOfType(node, s, overrides) {
+    if (!s.firstOfTypeStyle && !s.lastOfTypeStyle) return s;
+    const fl = this._typeFirstLast?.get(node.type);
+    if (!fl) return s;
+    const specialName = (fl.first === node.id && s.firstOfTypeStyle) ? s.firstOfTypeStyle
+                       : (fl.last  === node.id && s.lastOfTypeStyle)  ? s.lastOfTypeStyle
+                       : null;
+    if (!specialName) return s;
+    const specialResolved = this._styles.resolveNamed(specialName);
+    if (!specialResolved) return s;
+    return { ...s, ...specialResolved, ...overrides };
+  }
+
   _nodeStyle(node, hovered = false, active = false) {
     // Use per-relayout cache for plain (no hover/active) lookups
     if (!hovered && !active && this._styleCache) {
@@ -788,7 +820,8 @@ class Primework {
       const sn = node.styleName ?? (typeof node.style === 'string' ? node.style : null);
       const overrides = (typeof node.style === 'object' && node.style) ? node.style : {};
       const resolved = this._styles.resolve(node.type, sn, node.context ?? null, false, false, node.disabled ?? false);
-      const s = { ...resolved, ...overrides };
+      let s = { ...resolved, ...overrides };
+      s = this._applyFirstLastOfType(node, s, overrides);
       this._styleCache.set(k, s);
       return s;
     }
@@ -797,7 +830,8 @@ class Primework {
     const resolved = this._styles.resolve(
       node.type, sn, node.context ?? null, hovered, active, node.disabled ?? false
     );
-    return { ...resolved, ...overrides };
+    let s = { ...resolved, ...overrides };
+    return this._applyFirstLastOfType(node, s, overrides);
   }
 
   _fontSpec(node, s) {
@@ -1059,6 +1093,16 @@ class Primework {
     }
     // Per-relayout style cache — avoids re-resolving 8-layer cascade per node per pass
     this._styleCache = new Map();
+    // First/last-of-type tracking for firstOfTypeStyle/lastOfTypeStyle —
+    // computed once per relayout (this.nodes' own order is treated as
+    // document order) rather than scanned per-node inside _nodeStyle,
+    // which runs far too often for an O(n) scan each time.
+    this._typeFirstLast = new Map();
+    for (const n of this.nodes) {
+      let entry = this._typeFirstLast.get(n.type);
+      if (!entry) { entry = { first: n.id, last: n.id }; this._typeFirstLast.set(n.type, entry); }
+      else entry.last = n.id;
+    }
     for (const n of this.nodes) n._g = this._computeGeometry(n, null);
     // Build id→node Map once; avoids O(n²) Array.find in the resolution loop
     let nodeMap = new Map(this.nodes.map(n => [n.id, n]));
@@ -1111,7 +1155,30 @@ class Primework {
                 else if (sbRef === 'baseline')    adj = m.emAscent                   * size;
                 else if (sbRef === 'descender')   adj = (m.emAscent + m.emDescent)  * size;
               }
-              newTop = ref._g.y + ref._g.height + rawOffset - adj;
+              // spaceAfterRef: mirror of the above, but read from the REFERENCED
+              // (previous) node's own setting — it governs where THAT node's
+              // gap-to-next starts measuring from, at ITS last line's bottom,
+              // not this node's own top. _autoHeight()'s default bottom padding
+              // is the fixed approximation Math.round(size*0.4) (see there) —
+              // used here as the 'leading'/unset baseline so the two stay
+              // exactly consistent and this is a genuine no-op until someone
+              // opts in. 'baseline' removes that padding entirely (spaceAfter
+              // starts right at the last baseline); 'descender' uses the
+              // font's real descent instead of the fixed approximation.
+              // Every other value (including 'em'/'cap_height'/'x_height'/
+              // 'ascender', which don't have an obvious "bottom" meaning) is
+              // left as a no-op rather than guessed at.
+              let adjAfter = 0;
+              const refStyle = this._nodeStyle(ref);
+              const saRef = refStyle.spaceAfterRef ?? this._config.spaceReference;
+              if (saRef && (saRef === 'baseline' || saRef === 'descender') && this.ctx && ref.content) {
+                const { size: refSize, family: refFamily } = this._fontSpec(ref, refStyle);
+                const refM = FONT_METRICS._at100(refFamily, refStyle.weight || '400', this.ctx);
+                const defaultBottomPad = Math.round(refSize * 0.4); // matches _autoHeight's own default exactly
+                const desiredBottomPad = saRef === 'baseline' ? 0 : refM.emDescent * refSize;
+                adjAfter = defaultBottomPad - desiredBottomPad;
+              }
+              newTop = ref._g.y + ref._g.height + rawOffset - adj - adjAfter;
             }
 
             if (Math.round(newTop) !== Math.round(n._g.y)) {
@@ -2383,7 +2450,74 @@ class Primework {
     // _vAlignShift already applied to py above (before highlight drawing)
 
     ctx.textBaseline = 'top';
-    if (s.alignment === 'center') {
+    if (s.dropCapLines > 0 && text.length > 0 && s.alignment !== 'center' && s.alignment !== 'right' && s.alignment !== 'justify' && !fli) {
+      // Drop cap — enlarged first character, positioned over the height of
+      // its first N lines. Indents just those first N lines by the drop
+      // cap's own width + dropCapSpacing; every line after reverts to the
+      // normal left margin, matching how ordinary paragraphs already flow.
+      // This positions the drop cap at a fixed left margin for those N
+      // lines rather than tracing the cap's actual glyph contour — the
+      // simpler, lower-risk approach; a full wrap-around implementation
+      // would need per-line variable wrap widths, which _wrapToLines
+      // doesn't support today and would be a much larger, riskier change
+      // to the core wrapping algorithm.
+      const dcFont   = s.dropCapFont || family;
+      const dcColor  = s.dropCapColor || s.color || '#161616';
+      const dcSpace  = s.dropCapSpacing ?? 4;
+      const dcLines  = Math.max(1, Math.floor(s.dropCapLines));
+      const dcBoxH   = dcLines * lineH; // height available for the cap, top-aligned with the paragraph
+      // dropCapTopRef: which typographic line of the ENLARGED cap aligns
+      // with the paragraph's own top (py) — reuses the same reference
+      // vocabulary as spaceBeforeRef/spaceAfterRef for consistency, sized
+      // relative to the cap's own (enlarged) font size, not the body text's.
+      const dcRef = s.dropCapTopRef || 'cap_height';
+      // Solve for a cap font-size whose named reference line spans dcBoxH —
+      // e.g. dropCapTopRef:'cap_height' (default) makes the cap's actual
+      // cap-height (not its full em box) fill the N-line height, which is
+      // the conventional look; 'em' instead fills the full N lines with
+      // the em box itself (a visibly taller-looking cap for the same N).
+      const dcMetrics = FONT_METRICS._at100(dcFont, s.weight || '700', ctx);
+      const dcRefRatio = dcRef === 'em'         ? (dcMetrics.emAscent + dcMetrics.emDescent)
+                       : dcRef === 'x_height'    ? dcMetrics.xHeight
+                       : dcRef === 'ascender'    ? dcMetrics.ascender
+                       : dcMetrics.capHeight; // 'cap_height' default
+      const dcSize = dcBoxH / Math.max(0.01, dcRefRatio);
+      const dcChar = text[0];
+      const restText = text.slice(1);
+
+      ctx.save();
+      ctx.font = `700 ${dcSize}px ${dcFont}`;
+      const dcW = ctx.measureText(dcChar).width;
+      ctx.fillStyle = dcColor;
+      ctx.textBaseline = 'top';
+      // Vertically position so the SAME reference ratio used to size the
+      // cap also anchors it to py, keeping it visually flush with the
+      // paragraph's own top regardless of which reference was chosen.
+      const dcTopOffset = dcBoxH - dcRefRatio * dcSize;
+      ctx.fillText(dcChar, originX, py + dcTopOffset);
+      ctx.restore();
+      ctx.font = fontStr;
+      ctx.fillStyle = s.color || '#161616';
+      if (cs !== 0 && 'letterSpacing' in ctx) ctx.letterSpacing = (cs * size) + 'px';
+
+      const dcIndent = dcW + dcSpace;
+      const words = restText.split(' ');
+      let line = '', lineIdx = 0, fy = py;
+      for (const w of words) {
+        const t = line + w + ' ';
+        const indented = lineIdx < dcLines;
+        const indX = indented ? originX + dcIndent : originX - omaShift;
+        const indW = indented ? Math.max(1, maxW - dcIndent) : maxW + omaShift;
+        if (ctx.measureText(t).width > indW && line) {
+          ctx.fillText(line.trimEnd(), indX, fy);
+          fy += lineH; line = w + ' '; lineIdx++;
+        } else line = t;
+      }
+      if (line.trim()) {
+        const indented = lineIdx < dcLines;
+        ctx.fillText(line.trimEnd(), indented ? originX + dcIndent : originX - omaShift, fy);
+      }
+    } else if (s.alignment === 'center') {
       ctx.textAlign = 'center';
       this._wrap(text, g.x + g.width / 2, py, maxW, lineH);
     } else if (s.alignment === 'right') {
