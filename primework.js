@@ -1,5 +1,5 @@
 /*!
- * Primework v0.3.0
+ * Primework v0.3.1
  * Canvas-first UI framework -- one node tree, deterministic constraint layout,
  * canvas rendering, and invisible semantic HTML aliases for accessibility, SEO,
  * find-in-page and the clipboard.
@@ -17,18 +17,55 @@
  *     });
  *   </script>
  *
- * Full docs: primework-docs.html (ships alongside this file in the repo).
+ * Full docs: documentation.html (ships alongside this file in the repo).
  * License: Apache-2.0
  */
 
 'use strict';
 
-const PRIMEWORK_VERSION = '0.3.0';
+const PRIMEWORK_VERSION = '0.3.1';
 // =============================================================================
 //  STYLE DEFAULTS -- element-type baseline properties
 //  These are the implicit "user-agent stylesheet" of Primework.
 //  Every resolveStyle() call starts here before layering registry overrides.
 // =============================================================================
+
+// =============================================================================
+//  CARBON DESIGN TOKENS -- semantic text colours
+//  Hierarchy comes from typography, spacing and semantic colour -- never from
+//  reducing the opacity of body copy. The only sanctioned use of alpha on text
+//  is the disabled state (see SD_DISABLED).
+//
+//    textPrimary      body copy, headings -- full emphasis, always
+//    textSecondary    supporting copy that sits beside primary content
+//    textHelper       captions, metadata, field help, element tags
+//    textPlaceholder  empty-field placeholders ONLY -- never running text
+//    textOnColor      text sitting on a filled interactive colour
+//
+//  Contrast against the theme background (WCAG 2.1):
+//    white  #161616 18.1:1   #525252 7.81:1   #6f6f6f 5.02:1   #a8a8a8 2.38:1
+//    g100   #f4f4f4 16.4:1   #c6c6c6 10.6:1   #8d8d8d 5.45:1   #6f6f6f 3.60:1
+//  Anything below 4.5:1 is placeholder/decorative only.
+// =============================================================================
+
+const CARBON = {
+  white: {
+    background:'#ffffff', layer:'#f4f4f4', border:'#e0e0e0',
+    textPrimary:'#161616', textSecondary:'#525252', textHelper:'#6f6f6f',
+    textPlaceholder:'#a8a8a8', textOnColor:'#ffffff', textInverse:'#ffffff',
+    interactive:'#0f62fe', linkPrimary:'#0f62fe',
+  },
+  g100: {
+    background:'#161616', layer:'#262626', border:'#393939',
+    textPrimary:'#f4f4f4', textSecondary:'#c6c6c6', textHelper:'#8d8d8d',
+    textPlaceholder:'#6f6f6f', textOnColor:'#ffffff', textInverse:'#161616',
+    interactive:'#0f62fe', linkPrimary:'#78a9ff',
+  },
+};
+
+// Carbon expresses disabled text as primary at 25% alpha -- the one legitimate
+// opacity-based text state in the system.
+const CARBON_DISABLED_ALPHA = 0.25;
 
 const SD = {
   // Fallback — all elements inherit these unless overridden
@@ -133,7 +170,7 @@ const SD = {
     listBulletOffset: 0,         // horizontal nudge of bullet position
     listBulletIndent: 16,        // px indent of text from the bullet
 
-    // ── Drop cap (renderer: future) ────────────────────────────────────────
+    // ── Drop cap ───────────────────────────────────────────────────────────
     dropCapLines:   0,
     dropCapFont:    '',
     dropCapColor:   null,
@@ -149,6 +186,12 @@ const SD = {
     // ── Type variant styles ────────────────────────────────────────────────
     firstOfTypeStyle: '',
     lastOfTypeStyle:  '',
+    // Media (image / video)
+    objectFit: null,    // null=stretch (image) | 'cover' | 'contain'   (video defaults to 'cover')
+    matte:     null,    // colour painted behind a loaded image (shows through 'contain' letterboxing / alpha)
+    // Text overflow
+    noWrap:    false,   // true = never soft-wrap; only explicit \n breaks lines
+    clipText:  false,   // true = clip glyphs to the node box instead of overflowing it
 
     // ── Table cell ─────────────────────────────────────────────────────────
     cellVertAlign: 'top',        // 'top' | 'middle' | 'bottom'
@@ -158,13 +201,13 @@ const SD = {
   heading1:   { size:38, font:'IBM Plex Sans,system-ui,sans-serif', weight:'700', lineSpacing:1.2,  color:'#161616', heightReference:'cap' },
   heading2:   { size:28, font:'IBM Plex Sans,system-ui,sans-serif', weight:'700', lineSpacing:1.25, color:'#161616', heightReference:'cap' },
   heading3:   { size:22,                       weight:'700', lineSpacing:1.3,  color:'#161616', heightReference:'cap' },
-  heading4:   { size:18,                       weight:'600', lineSpacing:1.35, color:'#161616', heightReference:'cap' },
-  heading5:   { size:15,                       weight:'600',                   color:'#161616' },
-  heading6:   { size:12,                       weight:'600',                   color:'#161616', textTransform:'uppercase', letterSpacing:0.08 },
-  subheading: { size:17,                       weight:'600', lineSpacing:1.45, color:'#161616' },
-  paragraph:  { size:15,                                     lineSpacing:1.65, color:'#161616' },
+  heading4:   { size:18,                       weight:'600', lineSpacing:1.35, color:CARBON.white.textPrimary, heightReference:'cap' },
+  heading5:   { size:15,                       weight:'600',                   color:CARBON.white.textPrimary },
+  heading6:   { size:12,                       weight:'600',                   color:CARBON.white.textPrimary, textTransform:'uppercase', letterSpacing:0.08 },
+  subheading: { size:17,                       weight:'600', lineSpacing:1.45, color:CARBON.white.textPrimary },
+  paragraph:  { size:15,                                     lineSpacing:1.65, color:CARBON.white.textPrimary },
   label:      { verticalAlign:'middle', size:11, weight:'600', color:'#0f62fe', textTransform:'uppercase', letterSpacing:0.08 },
-  blockquote: { verticalAlign:'middle', size:16, font:'IBM Plex Sans,system-ui,sans-serif', italic:true,  lineSpacing:1.6,  color:'#161616', leftIndent:20 },
+  blockquote: { verticalAlign:'middle', size:16, font:'IBM Plex Sans,system-ui,sans-serif', italic:true,  lineSpacing:1.6,  color:CARBON.white.textPrimary, leftIndent:20 },
   code:       { size:13, font:'IBM Plex Mono,monospace',                       color:'#161616', background:'rgba(0,0,0,0.05)', paddingX:4, paddingY:2 },
   // Interactive
   button:     { verticalAlign:'middle', size:14, weight:'500', color:'#ffffff', background:'#0f62fe',
@@ -172,6 +215,7 @@ const SD = {
   link:       { verticalAlign:'middle', size:15, color:'#0f62fe', textDecoration:'underline', cursor:'pointer' },
   // Media & structure
   image:  { background:'#e8e8e8' },
+  video:  { background:'#e8e8e8', objectFit:'cover' },
   divider:{ color:'#e0e0e0', thickness:1 },
   rect:   { background:'#f4f4f4' },
   badge:  { size:11, weight:'600', color:'#ffffff', background:'#0f62fe',
@@ -675,6 +719,7 @@ function _toRoman(n) {
 
 class PrimeworkConfig {
   constructor(opts = {}) {
+    this.showScrollbar = opts.showScrollbar !== false;
     // Where the FIRST LINE of every text block is placed relative to the node top.
     // 'leading' — standard (em top at node top, no nudge)
     // 'em'      — same as leading
@@ -745,7 +790,7 @@ class Primework {
     this._TAGS = {
       heading1:'h1', heading2:'h2', heading3:'h3', heading4:'h4', heading5:'h5', heading6:'h6',
       subheading:'h2', paragraph:'p', label:'span', blockquote:'blockquote',
-      code:'pre', button:'button', link:'a', image:'img', divider:'hr',
+      code:'pre', button:'button', link:'a', image:'img', video:'figure', divider:'hr',
       rect:'section', badge:'span',
     };
 
@@ -767,14 +812,22 @@ class Primework {
   }
 
   // ── Public style API ────────────────────────────────────────────────────────
-  defineStyle(name, props) { this._styles.define(name, props); return this; }
-  styles(map)               { this._styles.many(map);          return this; }
+  defineStyle(name, props) { this._styles.define(name, props); this._restyle(); return this; }
+  styles(map)               { this._styles.many(map);          this._restyle(); return this; }
+
+  // Styles registered after nodes exist must not be hidden behind the
+  // per-relayout style cache: drop it now, re-lay-out once on the next frame.
+  _restyle() {
+    this._styleCache = null;
+    if (!this.nodes?.length || this._restyleRAF) return;
+    this._restyleRAF = requestAnimationFrame(() => { this._restyleRAF = null; this._relayout(); this._render(); });
+  }
   getStyles()               { return this._styles; }
 
   // Project-level typographic configuration.
   // Any property set here acts as the default for all nodes.
   // Per-node style properties override these.
-  config(opts) { Object.assign(this._config, opts); return this; }
+  config(opts) { Object.assign(this._config, opts); this._restyle(); return this; }
 
   // Map PrimeworkConfig.topReference to the alignTo string FontMetrics.alignOffset understands
   _topRefToAlignTo(ref) {
@@ -799,9 +852,12 @@ class Primework {
   // position style for whatever it doesn't itself override. First takes
   // priority over last when a node is somehow both (only one node of that
   // type exists) — matches the equivalent pubsuite convention.
+  // Scope: nodes are grouped by type AND node.typeGroup (optional string).
+  // Without typeGroup the scope is the whole page, so 'first paragraph'
+  // means the first paragraph anywhere in this.nodes.
   _applyFirstLastOfType(node, s, overrides) {
     if (!s.firstOfTypeStyle && !s.lastOfTypeStyle) return s;
-    const fl = this._typeFirstLast?.get(node.type);
+    const fl = this._typeFirstLast?.get(node.type + '\u0000' + (node.typeGroup ?? ''));
     if (!fl) return s;
     const specialName = (fl.first === node.id && s.firstOfTypeStyle) ? s.firstOfTypeStyle
                        : (fl.last  === node.id && s.lastOfTypeStyle)  ? s.lastOfTypeStyle
@@ -830,7 +886,7 @@ class Primework {
     const resolved = this._styles.resolve(
       node.type, sn, node.context ?? null, hovered, active, node.disabled ?? false
     );
-    let s = { ...resolved, ...overrides };
+    const s = { ...resolved, ...overrides };
     return this._applyFirstLastOfType(node, s, overrides);
   }
 
@@ -1013,25 +1069,88 @@ class Primework {
       effBulletIndent = s.listBulletIndent ?? 16;
     }
     let lines = 0;
-    let firstLine = true;
-    for (const rawLine of text.split('\n')) {
-      if (!rawLine) { lines++; firstLine = false; continue; }
-      const words = rawLine.split(' ');
-      let line = '';
-      for (const w of words) {
+    const dc = this._dropCapSpec(s, text, this._fontSpec(node, s).family, lineH, this.ctx, size);
+    if (s.noWrap) {
+      lines = text.split('\n').length;
+    } else if (dc) {
+      // Same word loop as the drop-cap draw path: first dcLines lines are narrower.
+      let line = '', lineIdx = 0;
+      for (const w of dc.rest.split(' ')) {
         const t = line + w + ' ';
-        const lineW = firstLine ? (effectiveW - fli) : effectiveW;
-        if (this.ctx.measureText(t).width > lineW && line) {
-          lines++; line = w+' '; firstLine = false;
-        } else line = t;
+        const lineW = lineIdx < dc.dcLines ? Math.max(1, effectiveW - dc.dcIndent) : effectiveW;
+        if (this.ctx.measureText(t.trimEnd()).width > lineW && line) { lineIdx++; line = w + ' '; }
+        else line = t;
       }
-      lines++;
-      firstLine = false;
+      lines = Math.max(lineIdx + 1, dc.dcLines);
+    } else {
+      let firstLine = true;
+      for (const rawLine of text.split('\n')) {
+        if (!rawLine) { lines++; firstLine = false; continue; }
+        const words = rawLine.split(' ');
+        let line = '';
+        for (const w of words) {
+          const t = line + w + ' ';
+          const lineW = firstLine ? (effectiveW - fli) : effectiveW;
+          // trimEnd(): identical fit test to _wrap/_wrapToLines, so the height
+          // computed here never disagrees with the lines actually drawn.
+          if (this.ctx.measureText(t.trimEnd()).width > lineW && line) {
+            lines++; line = w+' '; firstLine = false;
+          } else line = t;
+        }
+        lines++;
+        firstLine = false;
+      }
     }
     if (lines === 0) lines = 1;
     this.ctx.restore();
     // paddingY * 2 adds top + bottom padding to the node height
     return Math.ceil(lines * lineH) + Math.round(size * 0.4) + paddingY * 2;
+  }
+
+  // Drop-cap geometry, shared by _drawTextBlock and _autoHeight so the
+  // measured height always matches what gets drawn. Returns null when the
+  // style doesn't ask for a drop cap or the paragraph can't take one
+  // (centred / right / justified alignment, firstLineIndent, noWrap).
+  //
+  // The cap sits at a fixed left margin for its first N lines rather than
+  // tracing the glyph contour; lines after N revert to the normal margin.
+  // dropCapTopRef picks which line of the ENLARGED cap spans the N-line
+  // span: 'cap_height' (default), 'em', 'x_height' or 'ascender'. The span
+  // runs from that same line of the body text on line 1 down to the body's
+  // baseline on line N, and the cap sits on line N's baseline -- the
+  // conventional drop cap. 'em' instead fits the cap's whole em box between
+  // line 1's em-top and line N's descender, giving a shorter capital.
+  _dropCapSpec(s, text, family, lineH, ctx, size) {
+    if (!(s.dropCapLines > 0) || !text || s.noWrap || s.firstLineIndent) return null;
+    if (s.alignment === 'center' || s.alignment === 'right' || s.alignment === 'justify') return null;
+    const dcFont  = s.dropCapFont || family;
+    const dcLines = Math.max(1, Math.floor(s.dropCapLines));
+    const dcRef   = s.dropCapTopRef || 'cap_height';
+    const bm = FONT_METRICS._at100(family, s.weight || '400', ctx);
+    const baseN = bm.emAscent * size + (dcLines - 1) * lineH;          // line-N baseline, from py
+    const m = FONT_METRICS._at100(dcFont, '700', ctx);
+    // Span: from the matching body line on line 1 down to line N's baseline
+    // (or, for 'em', from line 1's em-top down to line N's descender).
+    let top, bottom = baseN, ratio;
+    if      (dcRef === 'em')       { top = 0; bottom = baseN + bm.emDescent * size; ratio = m.emAscent + m.emDescent; }
+    else if (dcRef === 'x_height') { top = (bm.emAscent - bm.xHeight)  * size; ratio = m.xHeight; }
+    else if (dcRef === 'ascender') { top = (bm.emAscent - bm.ascender) * size; ratio = m.ascender; }
+    else                           { top = (bm.emAscent - bm.capHeight)* size; ratio = m.capHeight; }
+    const dcBoxH = bottom - top;
+    const dcSize = dcBoxH / Math.max(0.01, ratio);
+    // Seat the cap: em -> its em box starts at top; others -> on line N's baseline.
+    const dcTop  = dcRef === 'em' ? top : baseN - m.emAscent * dcSize;
+    const dcChar = text[0];
+    ctx.save();
+    ctx.font = `700 ${dcSize}px ${dcFont}`;
+    const dcW = ctx.measureText(dcChar).width;
+    ctx.restore();
+    return {
+      dcChar, dcFont, dcSize, dcW, dcLines, dcBoxH, dcTop, ratio,
+      dcIndent: dcW + (s.dropCapSpacing ?? 4),
+      dcColor:  s.dropCapColor || s.color || '#161616',
+      rest:     text.slice(1),
+    };
   }
 
   _computeGeometry(node, topOverride) {
@@ -1099,8 +1218,9 @@ class Primework {
     // which runs far too often for an O(n) scan each time.
     this._typeFirstLast = new Map();
     for (const n of this.nodes) {
-      let entry = this._typeFirstLast.get(n.type);
-      if (!entry) { entry = { first: n.id, last: n.id }; this._typeFirstLast.set(n.type, entry); }
+      const key = n.type + '\u0000' + (n.typeGroup ?? '');
+      let entry = this._typeFirstLast.get(key);
+      if (!entry) { entry = { first: n.id, last: n.id }; this._typeFirstLast.set(key, entry); }
       else entry.last = n.id;
     }
     for (const n of this.nodes) n._g = this._computeGeometry(n, null);
@@ -1368,6 +1488,11 @@ class Primework {
       console.warn('Primework: update("' + id + '") — no node with that id.');
       return this;
     }
+    if (changes.type && changes.type !== this.nodes[i].type) this._disposeVideo(this.nodes[i]);
+    if (changes.src !== undefined && changes.src !== this.nodes[i].src && this.nodes[i]._img) {
+      this.nodes[i]._img.onload = this.nodes[i]._img.onerror = null;
+      this.nodes[i]._img = null;
+    }
     Object.assign(this.nodes[i], changes);
     this._zDirty = true;
     this._relayout(); this._computeMaxScroll();
@@ -1378,13 +1503,15 @@ class Primework {
   remove(id) {
     this._nodeRAFs?.get(id)?.();
     this._nodeRAFs?.delete(id);
+    this.nodes.filter(n => n.id===id).forEach(n => this._disposeVideo(n));
     this.nodes = this.nodes.filter(n => n.id!==id);
     this._zDirty = true;
     this._needsValidation = true;
     this._render(); this._syncAliases(); this.onChange?.(this.nodes); return this;
   }
 
-  getModel()   { return this.nodes.map(({_g,...n})=>n); }
+  // Runtime-only keys (_g geometry, _img/_video elements, caches) are left out.
+  getModel()   { return this.nodes.map(n => Object.fromEntries(Object.entries(n).filter(([k]) => !k.startsWith('_')))); }
 
   setHtmlMode(on) {
     this.htmlMode = on;
@@ -1392,6 +1519,11 @@ class Primework {
   }
 
   destroy() {
+    this.nodes.forEach(n => { if (n._img) { n._img.onload = n._img.onerror = null; n._img = null; } });
+    if (this._resizeRAF) { cancelAnimationFrame(this._resizeRAF); this._resizeRAF = null; }
+    if (this._videoRAF) { cancelAnimationFrame(this._videoRAF); this._videoRAF = null; }
+    if (this._restyleRAF) { cancelAnimationFrame(this._restyleRAF); this._restyleRAF = null; }
+    this.nodes.forEach(n => this._disposeVideo(n));
     this.stopAnimating();
     this.unbindScroll();
     if (this._boundKeyDown) window.removeEventListener('keydown', this._boundKeyDown);
@@ -1592,7 +1724,7 @@ class Primework {
     // ── Scrollbar drag ──────────────────────────────────────────────────────
     // Works in both design and preview mode. Detects click in the rightmost
     // 14px (scrollbar zone), starts drag from that position.
-    if (this._maxScrollY > 0 && this.mode !== 'embedded') {
+    if (this.showScrollbar && this._maxScrollY > 0 && this.mode !== 'embedded') {
       const r = this.interactLayer.getBoundingClientRect();
       const cx = e.clientX - r.left;
       const cy = e.clientY - r.top;
@@ -1783,7 +1915,7 @@ class Primework {
       const paraOffset = content.indexOf(para);
       for (const word of words) {
         const test = line + word + ' ';
-        if (this.ctx.measureText(test).width > maxWidth && line) {
+        if (this.ctx.measureText(test.trimEnd()).width > maxWidth && line) {
           lines.push({ text: line.trim(), start: paraOffset + lineStart });
           lineStart = charPos; line = word + ' ';
         } else { line = test; }
@@ -2047,7 +2179,7 @@ class Primework {
 
     // ── Scrollbar pill ───────────────────────────────────────────────────────
     // Scrollbar — try/catch so ctx.roundRect errors never prevent it drawing
-    if (this._maxScrollY > 0) {
+    if (this.showScrollbar && this._maxScrollY > 0) {
       try {
         const trackH = DOC_H;
         const thumbH = Math.max(28, trackH * DOC_H / (DOC_H + this._maxScrollY));
@@ -2068,6 +2200,22 @@ class Primework {
     }
     // Sync portals and native inputs
     for (const cb of this._renderCallbacks) cb();
+  }
+
+  _disposeVideo(node) {
+    const video = node._video;
+    if (video) {
+      video.onloadeddata = null; video.onerror = null; video.onplay = null;
+      video.pause(); video.removeAttribute('src'); video.load();
+    }
+    node._video = null; node._videoSrc = null; node._videoError = false;
+  }
+
+  // One-shot RAF re-render while any video is playing. No-op when the page
+  // already runs startAnimating(), since that loop repaints every frame.
+  _scheduleVideoFrame() {
+    if (this._animating || this._videoRAF) return;
+    this._videoRAF = requestAnimationFrame(() => { this._videoRAF = null; this._render(); });
   }
 
   _drawNode(node) {
@@ -2227,11 +2375,57 @@ class Primework {
         break;
       }
 
+      case 'video': {
+        if (node._videoSrc !== node.src) this._disposeVideo(node);
+        if (!node._video && node.src) {
+          const video = document.createElement('video');
+          node._video = video; node._videoSrc = node.src;
+          // Muted by default -- browsers only allow muted autoplay. Set
+          // node.muted:false for sound (then start it from a user gesture).
+          video.muted = node.muted !== false; video.playsInline = true; video.preload = 'auto';
+          video.loop = !!node.loop;
+          if (node.poster) video.poster = node.poster;
+          video.onloadeddata = () => { if (node._video === video) this._render(); };
+          video.onplay       = () => { if (node._video === video) this._render(); };
+          video.onerror = () => { if (node._video === video) { node._videoError = true; this._render(); } };
+          video.src = node.src;
+          if (node.autoplay) video.play().catch(() => {});
+        }
+        const video = node._video;
+        const r = s.borderRadius;
+        ctx.save();
+        ctx.beginPath(); ctx.rect(g.x,g.y,g.width,g.height); ctx.clip();
+        if (r) { this._rrect(g.x,g.y,g.width,g.height,r); ctx.clip(); }
+        if (video && video.readyState >= 2 && video.videoWidth > 0) {
+          if (s.matte) { ctx.fillStyle = s.matte; ctx.fillRect(g.x,g.y,g.width,g.height); }
+          const vw = video.videoWidth, vh = video.videoHeight;
+          if (s.objectFit === 'contain' || s.objectFit === 'cover' || s.objectFit == null) {
+            const scale = (s.objectFit === 'contain' ? Math.min : Math.max)(g.width/vw, g.height/vh);
+            const w = vw*scale, h = vh*scale;
+            ctx.drawImage(video, g.x+(g.width-w)/2, g.y+(g.height-h)/2, w, h);
+          } else {
+            ctx.drawImage(video, g.x, g.y, g.width, g.height); // objectFit:'fill'
+          }
+          // Keep frames flowing while playing, without hijacking the page's
+          // own startAnimating() loop (or starting one that never stops).
+          if (!video.paused && !video.ended) this._scheduleVideoFrame();
+        } else {
+          ctx.fillStyle = s.background || '#e8e8e8'; ctx.fillRect(g.x,g.y,g.width,g.height);
+          if (node._videoError || !node.src) {
+            ctx.fillStyle='#8d8d8d'; ctx.font='11px IBM Plex Mono,monospace';
+            ctx.textAlign='center'; ctx.textBaseline='middle';
+            ctx.fillText(node._videoError ? 'failed to load' : (node.alt || 'video'), g.x+g.width/2, g.y+g.height/2);
+          }
+        }
+        ctx.restore();
+        break;
+      }
+
       case 'image': {
         // If src provided, load and draw the actual image (async, re-renders on load)
+        // A failed source must also recover when the user selects another image.
+        if (node._imgSrc !== node.src) { node._img = null; node._imgErr = false; }
         if (node.src && !node._imgErr) {
-          // Invalidate cache if src changed
-          if (node._img && node._imgSrc !== node.src) { node._img = null; node._imgErr = false; }
           node._imgSrc = node.src;
           if (!node._img) {
             node._img = new Image();
@@ -2243,7 +2437,17 @@ class Primework {
             ctx.save();
             ctx.beginPath(); ctx.rect(g.x, g.y, g.width, g.height); ctx.clip();
             if (s.borderRadius) { ctx.beginPath(); this._rrect(g.x,g.y,g.width,g.height,s.borderRadius); ctx.clip(); }
-            ctx.drawImage(node._img, g.x, g.y, g.width, g.height);
+            // Matte after the clip so it follows borderRadius instead of
+            // leaving square corners behind a rounded image.
+            if (s.matte) { ctx.fillStyle = s.matte; ctx.fillRect(g.x,g.y,g.width,g.height); }
+            const iw = node._img.naturalWidth, ih = node._img.naturalHeight;
+            if (s.objectFit === 'cover' || s.objectFit === 'contain') {
+              const scale = (s.objectFit === 'cover' ? Math.max : Math.min)(g.width / iw, g.height / ih);
+              const dw = iw * scale, dh = ih * scale;
+              ctx.drawImage(node._img, g.x + (g.width - dw) / 2, g.y + (g.height - dh) / 2, dw, dh);
+            } else {
+              ctx.drawImage(node._img, g.x, g.y, g.width, g.height);
+            }
             ctx.restore();
             break;
           }
@@ -2336,6 +2540,7 @@ class Primework {
     py += (s.baselineOffset || 0);
 
     ctx.save();
+    if (s.clipText) { ctx.beginPath(); ctx.rect(g.x, g.y, g.width, g.height); ctx.clip(); }
     ctx.font = fontStr;
 
     // ── Letter spacing (charSpace in em) ─────────────────────────────────────
@@ -2365,7 +2570,7 @@ class Primework {
     const fli = s.firstLineIndent || 0;
 
     // ── Compute wrapped lines once (used by decorations too) ──────────────────
-    const lines = this._wrapToLines(text, maxW + omaShift); // match actual draw width
+    const lines = this._wrapToLines(text, maxW + omaShift, !!s.noWrap); // match actual draw width
 
     // ── verticalAlign:'middle' — compute and apply shift BEFORE drawing anything ──
     let _vAlignShift = 0;
@@ -2450,73 +2655,36 @@ class Primework {
     // _vAlignShift already applied to py above (before highlight drawing)
 
     ctx.textBaseline = 'top';
-    if (s.dropCapLines > 0 && text.length > 0 && s.alignment !== 'center' && s.alignment !== 'right' && s.alignment !== 'justify' && !fli) {
-      // Drop cap — enlarged first character, positioned over the height of
-      // its first N lines. Indents just those first N lines by the drop
-      // cap's own width + dropCapSpacing; every line after reverts to the
-      // normal left margin, matching how ordinary paragraphs already flow.
-      // This positions the drop cap at a fixed left margin for those N
-      // lines rather than tracing the cap's actual glyph contour — the
-      // simpler, lower-risk approach; a full wrap-around implementation
-      // would need per-line variable wrap widths, which _wrapToLines
-      // doesn't support today and would be a much larger, riskier change
-      // to the core wrapping algorithm.
-      const dcFont   = s.dropCapFont || family;
-      const dcColor  = s.dropCapColor || s.color || '#161616';
-      const dcSpace  = s.dropCapSpacing ?? 4;
-      const dcLines  = Math.max(1, Math.floor(s.dropCapLines));
-      const dcBoxH   = dcLines * lineH; // height available for the cap, top-aligned with the paragraph
-      // dropCapTopRef: which typographic line of the ENLARGED cap aligns
-      // with the paragraph's own top (py) — reuses the same reference
-      // vocabulary as spaceBeforeRef/spaceAfterRef for consistency, sized
-      // relative to the cap's own (enlarged) font size, not the body text's.
-      const dcRef = s.dropCapTopRef || 'cap_height';
-      // Solve for a cap font-size whose named reference line spans dcBoxH —
-      // e.g. dropCapTopRef:'cap_height' (default) makes the cap's actual
-      // cap-height (not its full em box) fill the N-line height, which is
-      // the conventional look; 'em' instead fills the full N lines with
-      // the em box itself (a visibly taller-looking cap for the same N).
-      const dcMetrics = FONT_METRICS._at100(dcFont, s.weight || '700', ctx);
-      const dcRefRatio = dcRef === 'em'         ? (dcMetrics.emAscent + dcMetrics.emDescent)
-                       : dcRef === 'x_height'    ? dcMetrics.xHeight
-                       : dcRef === 'ascender'    ? dcMetrics.ascender
-                       : dcMetrics.capHeight; // 'cap_height' default
-      const dcSize = dcBoxH / Math.max(0.01, dcRefRatio);
-      const dcChar = text[0];
-      const restText = text.slice(1);
-
+    const dc = this._dropCapSpec(s, text, family, lineH, ctx, size);
+    if (s.noWrap) {
+      // One drawn line per explicit \n -- the same split _wrapToLines(noWrap)
+      // gives underline/highlight/selection, so decorations stay aligned.
+      ctx.textAlign = s.alignment === 'right' ? 'right' : (s.alignment === 'center' ? 'center' : 'left');
+      const tx = ctx.textAlign === 'right' ? g.x + g.width - ri : (ctx.textAlign === 'center' ? g.x + g.width / 2 : originX);
+      text.split('\n').forEach((ln, i) => { if (ln) ctx.fillText(ln, tx, py + i * lineH); });
+    } else if (dc) {
+      // Drop cap -- enlarged first character spanning dcLines lines,
+      // seated on the baseline of line dcLines (see _dropCapSpec).
       ctx.save();
-      ctx.font = `700 ${dcSize}px ${dcFont}`;
-      const dcW = ctx.measureText(dcChar).width;
-      ctx.fillStyle = dcColor;
+      ctx.font = `700 ${dc.dcSize}px ${dc.dcFont}`;
+      ctx.fillStyle = dc.dcColor;
       ctx.textBaseline = 'top';
-      // Vertically position so the SAME reference ratio used to size the
-      // cap also anchors it to py, keeping it visually flush with the
-      // paragraph's own top regardless of which reference was chosen.
-      const dcTopOffset = dcBoxH - dcRefRatio * dcSize;
-      ctx.fillText(dcChar, originX, py + dcTopOffset);
+      ctx.fillText(dc.dcChar, originX, py + dc.dcTop);
       ctx.restore();
       ctx.font = fontStr;
       ctx.fillStyle = s.color || '#161616';
       if (cs !== 0 && 'letterSpacing' in ctx) ctx.letterSpacing = (cs * size) + 'px';
-
-      const dcIndent = dcW + dcSpace;
-      const words = restText.split(' ');
       let line = '', lineIdx = 0, fy = py;
-      for (const w of words) {
+      const xAt = i => i < dc.dcLines ? originX + dc.dcIndent : originX - omaShift;
+      const wAt = i => i < dc.dcLines ? Math.max(1, maxW - dc.dcIndent) : maxW + omaShift;
+      for (const w of dc.rest.split(' ')) {
         const t = line + w + ' ';
-        const indented = lineIdx < dcLines;
-        const indX = indented ? originX + dcIndent : originX - omaShift;
-        const indW = indented ? Math.max(1, maxW - dcIndent) : maxW + omaShift;
-        if (ctx.measureText(t).width > indW && line) {
-          ctx.fillText(line.trimEnd(), indX, fy);
+        if (ctx.measureText(t.trimEnd()).width > wAt(lineIdx) && line) {
+          ctx.fillText(line.trimEnd(), xAt(lineIdx), fy);
           fy += lineH; line = w + ' '; lineIdx++;
         } else line = t;
       }
-      if (line.trim()) {
-        const indented = lineIdx < dcLines;
-        ctx.fillText(line.trimEnd(), indented ? originX + dcIndent : originX - omaShift, fy);
-      }
+      if (line.trim()) ctx.fillText(line.trimEnd(), xAt(lineIdx), fy);
     } else if (s.alignment === 'center') {
       ctx.textAlign = 'center';
       this._wrap(text, g.x + g.width / 2, py, maxW, lineH);
@@ -2537,7 +2705,7 @@ class Primework {
           const t = line + w + ' ';
           const indX  = firstDone ? originX - omaShift : originX + fli;
           const indW  = firstDone ? maxW + omaShift    : maxW - fli + omaShift;
-          if (ctx2.measureText(t).width > indW && line) {
+          if (ctx2.measureText(t.trimEnd()).width > indW && line) {
             ctx2.fillText(line.trimEnd(), indX, fy);
             fy += lineH; line = w + ' '; firstDone = true;
           } else line = t;
@@ -2616,7 +2784,7 @@ class Primework {
       let line = '';
       for (const w of words) {
         const t = line + w + ' ';
-        if (ctx.measureText(t).width > maxW && line) {
+        if (ctx.measureText(t.trimEnd()).width > maxW && line) {
           ctx.fillText(line.trimEnd(), x, y); y += lineH; line = w + ' ';
         } else line = t;
       }
@@ -2628,11 +2796,9 @@ class Primework {
   // Last line (and single-word lines) are drawn left-aligned.
   _wrapJustified(text, x, py, maxW, lineH) {
     const ctx  = this.ctx;
-    const lines = this._wrapToLines(text, maxW + omaShift); // match actual draw width   // 
--aware
+    const lines = this._wrapToLines(text, maxW); // Caller already includes optical-margin allowance.
     lines.forEach(({ text: lt }, li) => {
-      if (!lt) { py += lineH; return; }             // blank 
- line
+      if (!lt) { py += lineH; return; }             // blank line
       const isLast = li === lines.length - 1;
       if (isLast) { ctx.fillText(lt, x, py); py += lineH; return; }
       const words = lt.split(' ').filter(w => w.length > 0);
@@ -2649,7 +2815,18 @@ class Primework {
   }
 
   _rrect(x,y,w,h,r) {
-    const c=this.ctx, R=Math.min(r,w/2,h/2);
+    const c=this.ctx;
+    if (Array.isArray(r)) {
+      // CSS shorthand order: [all] | [tl/br, tr/bl] | [tl, tr/bl, br] | [tl, tr, br, bl]
+      const q = r.length === 1 ? [r[0],r[0],r[0],r[0]] : r.length === 2 ? [r[0],r[1],r[0],r[1]]
+              : r.length === 3 ? [r[0],r[1],r[2],r[1]] : r;
+      const [tl,tr,br,bl] = q.map(v => Math.max(0,Math.min(+v || 0,w/2,h/2)));
+      c.beginPath(); c.moveTo(x+tl,y); c.lineTo(x+w-tr,y); c.quadraticCurveTo(x+w,y,x+w,y+tr);
+      c.lineTo(x+w,y+h-br); c.quadraticCurveTo(x+w,y+h,x+w-br,y+h);
+      c.lineTo(x+bl,y+h); c.quadraticCurveTo(x,y+h,x,y+h-bl);
+      c.lineTo(x,y+tl); c.quadraticCurveTo(x,y,x+tl,y); c.closePath(); return;
+    }
+    const R=Math.min(r,w/2,h/2);
     c.beginPath(); c.moveTo(x+R,y); c.arcTo(x+w,y,x+w,y+h,R);
     c.arcTo(x+w,y+h,x,y+h,R); c.arcTo(x,y+h,x,y,R); c.arcTo(x,y,x+w,y,R); c.closePath();
   }
@@ -2710,6 +2887,12 @@ class Primework {
     el.dataset.type     = type;
 
     // ── Content ─────────────────────────────────────────────────────────────
+    if (type === 'video') {
+      // A <figure role=img> with a label -- the pixels live on the canvas,
+      // the alias only has to tell assistive tech what the video is.
+      el.setAttribute('role', 'img');
+      el.setAttribute('aria-label', node.alt || content || 'video');
+    }
     if (type === 'image') {
       el.setAttribute('alt', node.alt || content || '');
     } else if (type !== 'divider' && type !== 'rect') {
@@ -3150,7 +3333,13 @@ class NodeBuilder {
   aria(label)       { this._n.ariaLabel = label; return this; }
   role(v)           { this._n.role = v;       return this; }
   href(v)           { this._n.href = v;       return this; }
-  src(v)            { this._n.src  = v;       return this; }  // for image nodes
+  src(v)            { this._n.src  = v;       return this; }  // image / video nodes
+  alt(v)            { this._n.alt  = v;       return this; }  // image / video accessible name
+  // Video playback flags
+  autoplay(v=true)  { this._n.autoplay = v;  return this; }
+  loop(v=true)      { this._n.loop = v;      return this; }
+  muted(v=true)     { this._n.muted = v;     return this; }
+  poster(v)         { this._n.poster = v;    return this; }
   // Disabled state
   disabled(v=true)  { this._n.disabled = v;   return this; }
   // Terminals: add to document or return live reference
@@ -3166,7 +3355,7 @@ class NodeBuilder {
 {
   const TYPES = ['heading1','heading2','heading3','heading4','heading5','heading6',
                  'subheading','paragraph','label','blockquote','code',
-                 'button','link','badge','rect','image','divider'];
+                 'button','link','badge','rect','image','video','divider'];
   for (const t of TYPES) {
     Primework.prototype[t] = function(content, constraints, style) {
       const b = new NodeBuilder(this, t, content);
@@ -3194,6 +3383,37 @@ class NodeBuilder {
 //
 //  Tokens can also be spread with style({...S.body, color:'#fff'}) for overrides.
 // =============================================================================
+// pw.theme('white' | 'g100') -- apply a Carbon theme's text/surface tokens
+// to every element type. pw.token('textSecondary') reads the active theme.
+Primework.prototype.theme = function(name) {
+  const t = CARBON[name];
+  if (!t) throw new Error(`Primework: unknown theme '${name}'. Use 'white' or 'g100'.`);
+  this._theme = name;
+  return this.styles({
+    heading1:{color:t.textPrimary}, heading2:{color:t.textPrimary},
+    heading3:{color:t.textPrimary}, heading4:{color:t.textPrimary},
+    heading5:{color:t.textPrimary}, heading6:{color:t.textPrimary},
+    subheading:{color:t.textPrimary},
+    paragraph:{color:t.textPrimary},
+    blockquote:{color:t.textPrimary},
+    code:{color:t.textPrimary},
+    link:{color:t.linkPrimary},
+    button:{color:t.textOnColor, background:t.interactive},
+    label:{color:t.linkPrimary},
+    divider:{color:t.border},
+    rect:{background:t.layer},
+    image:{background:t.layer},
+  });
+};
+
+// pw.token(key) -- read a semantic token for the active theme.
+//   pw.token('textHelper')  ->  '#8d8d8d' under g100
+Primework.prototype.token = function(key) {
+  const t = CARBON[this._theme || 'white'];
+  if (!(key in t)) throw new Error(`Primework: unknown token '${key}'.`);
+  return t[key];
+};
+
 Primework.prototype.define = function(styleMap) {
   const resolved = Object.create(null);
   const resolve = (key, visited = new Set()) => {
@@ -3232,7 +3452,7 @@ Primework.prototype.section = function(context, baseConstraints) {
   const section = {};
   const TYPES = ['heading1','heading2','heading3','heading4','heading5','heading6',
                  'subheading','paragraph','label','blockquote','code',
-                 'button','link','badge','rect','image','divider'];
+                 'button','link','badge','rect','image','video','divider'];
   for (const t of TYPES) {
     section[t] = function(content) {
       const b = pw[t](content);
@@ -3264,7 +3484,7 @@ Primework.prototype.css = function(cssText) {
     const TAG_MAP = {
       h1:'heading1',h2:'heading2',h3:'heading3',h4:'heading4',h5:'heading5',h6:'heading6',
       p:'paragraph',span:'label',a:'link',button:'button',blockquote:'blockquote',
-      code:'pre',section:'rect',div:'rect',img:'image',hr:'divider',
+      code:'code',pre:'code',section:'rect',div:'rect',img:'image',video:'video',hr:'divider',
     };
     const mapTag = t => TAG_MAP[t] || t;
     // Map CSS-like selector to Primework cascade key
@@ -3331,7 +3551,8 @@ Primework.prototype.snapshot = function(options = {}) {
 // (render, onClick etc.) — keeps layout/style/content only.
 // Use to save and restore document state.
 Primework.prototype.toJSON = function() {
-  const SKIP = new Set(['_g','_img','_imgSrc','_imgErr','_imgLoaded','set','__raw']);
+  const SKIP = new Set(['_g','_img','_imgSrc','_imgErr','_imgLoaded',
+                        '_video','_videoSrc','_videoError','_rc','set','__raw']);
   return this.nodes.map(node => {
     const out = {};
     for (const [k,v] of Object.entries(node)) {
@@ -3346,11 +3567,26 @@ Primework.prototype.toJSON = function() {
 // pw.fromJSON(arr) — restore a previously serialized node tree.
 // Replaces all current nodes. Call inside document.fonts.ready.
 Primework.prototype.fromJSON = function(arr) {
+  // Release media owned by the outgoing tree (a playing <video> would keep
+  // decoding off-screen), and never trust runtime-only keys from input.
+  this.nodes.forEach(n => this._disposeVideo(n));
+  arr = (arr || []).map(n => {
+    const o = {};
+    for (const [k, v] of Object.entries(n)) if (!k.startsWith('_')) o[k] = v;
+    return o;
+  });
   this.nodes = [];
   this._zDirty = true;
   this._needsValidation = true;
   this._styleCache = null; // clear stale cache
   return this.addAll(arr);
+};
+
+// pw.mediaElement(id) -- the HTMLVideoElement behind a 'video' node (null
+// until the node has drawn once with a src). Use it for play()/pause()/
+// currentTime; frames keep repainting while it plays.
+Primework.prototype.mediaElement = function(id) {
+  return this.nodes.find(n => n.id === id)?._video ?? null;
 };
 
 Primework.prototype.findNode = function(id) {
