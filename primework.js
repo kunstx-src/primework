@@ -30,49 +30,12 @@ const PRIMEWORK_VERSION = '0.3.1';
 //  Every resolveStyle() call starts here before layering registry overrides.
 // =============================================================================
 
-// =============================================================================
-//  CARBON DESIGN TOKENS -- semantic text colours
-//  Hierarchy comes from typography, spacing and semantic colour -- never from
-//  reducing the opacity of body copy. The only sanctioned use of alpha on text
-//  is the disabled state (see SD_DISABLED).
-//
-//    textPrimary      body copy, headings -- full emphasis, always
-//    textSecondary    supporting copy that sits beside primary content
-//    textHelper       captions, metadata, field help, element tags
-//    textPlaceholder  empty-field placeholders ONLY -- never running text
-//    textOnColor      text sitting on a filled interactive colour
-//
-//  Contrast against the theme background (WCAG 2.1):
-//    white  #161616 18.1:1   #525252 7.81:1   #6f6f6f 5.02:1   #a8a8a8 2.38:1
-//    g100   #f4f4f4 16.4:1   #c6c6c6 10.6:1   #8d8d8d 5.45:1   #6f6f6f 3.60:1
-//  Anything below 4.5:1 is placeholder/decorative only.
-// =============================================================================
-
-const CARBON = {
-  white: {
-    background:'#ffffff', layer:'#f4f4f4', border:'#e0e0e0',
-    textPrimary:'#161616', textSecondary:'#525252', textHelper:'#6f6f6f',
-    textPlaceholder:'#a8a8a8', textOnColor:'#ffffff', textInverse:'#ffffff',
-    interactive:'#0f62fe', linkPrimary:'#0f62fe',
-  },
-  g100: {
-    background:'#161616', layer:'#262626', border:'#393939',
-    textPrimary:'#f4f4f4', textSecondary:'#c6c6c6', textHelper:'#8d8d8d',
-    textPlaceholder:'#6f6f6f', textOnColor:'#ffffff', textInverse:'#161616',
-    interactive:'#0f62fe', linkPrimary:'#78a9ff',
-  },
-};
-
-// Carbon expresses disabled text as primary at 25% alpha -- the one legitimate
-// opacity-based text state in the system.
-const CARBON_DISABLED_ALPHA = 0.25;
-
 const SD = {
   // Fallback — all elements inherit these unless overridden
   _: {
     // Core typography
-    size:15, font:'IBM Plex Sans,system-ui,sans-serif',
-    color:'#161616', weight:'400', italic:false,
+    size:15, font:'system-ui,sans-serif',
+    color:'#000000', weight:'400', italic:false,
     lineSpacing:1.5,              // em multiplier (size × lineSpacing = line height)
     leading:null,                 // absolute line height in px — overrides lineSpacing when set
     alignment:'left',             // 'left' | 'center' | 'right' | 'justify'
@@ -91,7 +54,7 @@ const SD = {
 
     // Block
     background:null, paddingX:0, paddingY:0,
-    borderRadius:0, border:null, borderWidth:0, borderColor:'#e0e0e0',
+    borderRadius:0, border:null, borderWidth:0, borderColor:null,
     shadow:false, shadowColor:'rgba(0,0,0,0.12)', shadowBlur:16, shadowOffsetY:4,
     leftIndent:0, rightIndent:0, opacity:1,
 
@@ -198,34 +161,34 @@ const SD = {
     cellVRef:      'cap_height', // 'em_top'|'cap_height'|'x_height'|'baseline'
   },
   // Typography elements
-  heading1:   { size:38, font:'IBM Plex Sans,system-ui,sans-serif', weight:'700', lineSpacing:1.2,  color:'#161616', heightReference:'cap' },
-  heading2:   { size:28, font:'IBM Plex Sans,system-ui,sans-serif', weight:'700', lineSpacing:1.25, color:'#161616', heightReference:'cap' },
-  heading3:   { size:22,                       weight:'700', lineSpacing:1.3,  color:'#161616', heightReference:'cap' },
-  heading4:   { size:18,                       weight:'600', lineSpacing:1.35, color:CARBON.white.textPrimary, heightReference:'cap' },
-  heading5:   { size:15,                       weight:'600',                   color:CARBON.white.textPrimary },
-  heading6:   { size:12,                       weight:'600',                   color:CARBON.white.textPrimary, textTransform:'uppercase', letterSpacing:0.08 },
-  subheading: { size:17,                       weight:'600', lineSpacing:1.45, color:CARBON.white.textPrimary },
-  paragraph:  { size:15,                                     lineSpacing:1.65, color:CARBON.white.textPrimary },
-  label:      { verticalAlign:'middle', size:11, weight:'600', color:'#0f62fe', textTransform:'uppercase', letterSpacing:0.08 },
-  blockquote: { verticalAlign:'middle', size:16, font:'IBM Plex Sans,system-ui,sans-serif', italic:true,  lineSpacing:1.6,  color:CARBON.white.textPrimary, leftIndent:20 },
-  code:       { size:13, font:'IBM Plex Mono,monospace',                       color:'#161616', background:'rgba(0,0,0,0.05)', paddingX:4, paddingY:2 },
+  heading1:   { size:38, weight:'700', lineSpacing:1.2,  heightReference:'cap' },
+  heading2:   { size:28, weight:'700', lineSpacing:1.25, heightReference:'cap' },
+  heading3:   { size:22, weight:'700', lineSpacing:1.3,  heightReference:'cap' },
+  heading4:   { size:18, weight:'600', lineSpacing:1.35, heightReference:'cap' },
+  heading5:   { size:15, weight:'600' },
+  heading6:   { size:12, weight:'600', textTransform:'uppercase', letterSpacing:0.08 },
+  subheading: { size:17, weight:'600', lineSpacing:1.45 },
+  paragraph:  { size:15, lineSpacing:1.65 },
+  label:      { verticalAlign:'middle', size:11, weight:'600', textTransform:'uppercase', letterSpacing:0.08 },
+  blockquote: { verticalAlign:'middle', size:16, italic:true, lineSpacing:1.6, leftIndent:20 },
+  code:       { size:13, font:'ui-monospace,monospace', background:'rgba(0,0,0,0.05)', paddingX:4, paddingY:2 },
   // Interactive
-  button:     { verticalAlign:'middle', size:14, weight:'500', color:'#ffffff', background:'#0f62fe',
+  button:     { verticalAlign:'middle', size:14, weight:'500', color:'#ffffff', background:'#000000',
                 paddingX:20, paddingY:0, borderRadius:0, cursor:'pointer' },
-  link:       { verticalAlign:'middle', size:15, color:'#0f62fe', textDecoration:'underline', cursor:'pointer' },
+  link:       { verticalAlign:'middle', size:15, color:'#0000ee', textDecoration:'underline', cursor:'pointer' },
   // Media & structure
   image:  { background:'#e8e8e8' },
   video:  { background:'#e8e8e8', objectFit:'cover' },
-  divider:{ color:'#e0e0e0', thickness:1 },
-  rect:   { background:'#f4f4f4' },
-  badge:  { size:11, weight:'600', color:'#ffffff', background:'#0f62fe',
+  divider:{ color:'#cccccc', thickness:1 },
+  rect:   { background:'#eeeeee' },
+  badge:  { size:11, weight:'600', color:'#ffffff', background:'#000000',
             paddingX:6, paddingY:2, borderRadius:100 },
 };
 
 // Built-in disabled states
 const SD_DISABLED = {
-  button:  { background:'#c6c6c6', color:'#8d8d8d', opacity:0.6, cursor:'not-allowed' },
-  link:    { color:'#8d8d8d', textDecoration:'none', cursor:'not-allowed' },
+  button:  { background:'#cccccc', color:'#888888', opacity:0.6, cursor:'not-allowed' },
+  link:    { color:'#888888', textDecoration:'none', cursor:'not-allowed' },
   _:       { opacity:0.5, cursor:'not-allowed' },
 };
 
@@ -557,6 +520,7 @@ function parseFontFileMetrics(arrayBuffer) {
 //
 //  Resolution order for doc.resolveStyle('button', 'primary', 'nav', hover):
 //    1. SD._  (universal defaults)
+//       registry['*']  (your base for every type: font, colour, …)
 //    2. SD['button']  (type defaults)
 //    3. registry['button']  (type-level overrides)
 //    4. registry['button.primary']  (named class)
@@ -596,7 +560,7 @@ class StyleRegistry {
     const m = (...layers) => Object.assign({}, ...layers.filter(Boolean));
 
     const base = m(
-      SD._,  SD[type],
+      SD._,  g('*'),  SD[type],
       g(type),
       fullName ? g(fullName) : null,
       context  ? g(`${context}\u2192${type}`)                  : null,
@@ -896,7 +860,7 @@ class Primework {
     const rawSz = s.size ?? d.size ?? 15;
     const wt    = s.weight ?? d.weight ?? '400';
     const it    = (s.italic ?? d.italic) ? 'italic ' : '';
-    const fm    = s.font ?? d.font ?? 'IBM Plex Sans,system-ui,sans-serif';
+    const fm    = s.font ?? d.font ?? SD._.font;
     const href  = s.heightReference ?? d.heightReference ?? 'em';
 
     // Convert size to em-px via FontMetrics when heightReference != 'em'
@@ -921,7 +885,8 @@ class Primework {
       const sel = document.createElement('style');
       sel.id = 'primework-selection-style';
       sel.textContent = '[data-canvas-id]::selection{background:transparent;color:transparent;}' +
-                         '[data-canvas-id]::-moz-selection{background:transparent;color:transparent;}';
+                         '[data-canvas-id]::-moz-selection{background:transparent;color:transparent;}' +
+                         ':where(.primework-skip-link){background:#000;color:#fff;font:600 14px system-ui,sans-serif;}';
       document.head.appendChild(sel);
     }
 
@@ -970,10 +935,10 @@ class Primework {
     this._skipLink = document.createElement('a');
     this._skipLink.href = '#pw-main-content';
     this._skipLink.textContent = 'Skip to main content';
+    this._skipLink.className = 'primework-skip-link';
     this._skipLink.style.cssText = [
       'position:absolute','top:-40px','left:0','z-index:10000',
-      'padding:8px 16px','background:#0f62fe','color:#fff',
-      'font:600 14px IBM Plex Sans,sans-serif','text-decoration:none',
+      'padding:8px 16px','text-decoration:none',
       'border-radius:0 0 4px 0','transition:top .1s',
     ].join(';');
     this._skipLink.addEventListener('focus',  () => { this._skipLink.style.top='0'; });
@@ -1148,7 +1113,7 @@ class Primework {
     return {
       dcChar, dcFont, dcSize, dcW, dcLines, dcBoxH, dcTop, ratio,
       dcIndent: dcW + (s.dropCapSpacing ?? 4),
-      dcColor:  s.dropCapColor || s.color || '#161616',
+      dcColor:  s.dropCapColor || s.color || '#000000',
       rest:     text.slice(1),
     };
   }
@@ -2088,7 +2053,8 @@ class Primework {
     const hlH       = capAsc + descBel;  // height: cap-top → desc-bottom
 
     const s_sel   = this._nodeStyle(node);
-    const selBg   = s_sel.selectionColor      || this._config.selectionColor    || 'rgba(15,98,254,0.3)';
+    const selBg   = s_sel.selectionColor      || this._config.selectionColor
+                 || (this._isColorDark(this.clearColor || '#ffffff') ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.2)');
     const selTxt  = s_sel.selectionTextColor  || this._config.selectionTextColor;
 
     ctx.fillStyle = selBg;
@@ -2234,9 +2200,10 @@ class Primework {
     // Keyboard focus ring — drawn when this node's alias has DOM focus
     if (id === this.focusedId) {
       ctx.save(); ctx.globalAlpha = 1;
-      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
+      const _dark = this._isColorDark(this.clearColor || '#ffffff');
+      ctx.strokeStyle = this._config.focusRingOuterColor || (_dark ? '#000000' : '#ffffff'); ctx.lineWidth = 3;
       ctx.strokeRect(g.x - 2, g.y - 2, g.width + 4, g.height + 4);
-      ctx.strokeStyle = '#0f62fe'; ctx.lineWidth = 2;
+      ctx.strokeStyle = this._config.focusRingColor || (_dark ? '#ffffff' : '#000000'); ctx.lineWidth = 2;
       ctx.strokeRect(g.x - 2, g.y - 2, g.width + 4, g.height + 4);
       ctx.restore();
     }
@@ -2276,7 +2243,7 @@ class Primework {
         if (s.background) this._drawSurface(g, s);
         if (s.leftIndent > 0) {
           ctx.save(); ctx.globalAlpha = 1;
-          ctx.fillStyle = s.borderColor||'#0f62fe';
+          ctx.fillStyle = s.borderColor||s.color;
           ctx.fillRect(g.x, g.y, s.borderWidth||3, g.height);
           ctx.restore();
         }
@@ -2303,11 +2270,11 @@ class Primework {
 
       case 'link': {
         const ls = this._nodeStyle(node, hov, false);
-        if (ls.background || ls.border || (ls.borderWidth && ls.borderColor)) this._drawSurface(g, ls);
+        if (ls.background || ls.border || ls.borderWidth) this._drawSurface(g, ls);
         const { fontStr, size } = this._fontSpec(node, ls);
         ctx.save();
         ctx.font = fontStr;
-        ctx.fillStyle = ls.color || '#0f62fe';
+        ctx.fillStyle = ls.color || '#000000';
 
         // Vertical centering: measure with alphabetic baseline
         // capAsc = cap height above baseline
@@ -2345,7 +2312,7 @@ class Primework {
           // Underline sits at the baseline
           const ulY = linkBaselineY + (ls.underlineOffset ?? 2);
           const tw  = ctx.measureText(lt).width;
-          ctx.strokeStyle = ls.underlineColor || ls.color || '#0f62fe';
+          ctx.strokeStyle = ls.underlineColor || ls.color || '#000000';
           ctx.lineWidth   = ls.underlineWidth || 1;
           if (ls.underlineStyle === 'dashed')      ctx.setLineDash([4, 3]);
           else if (ls.underlineStyle === 'dotted') ctx.setLineDash([1, 2]);
@@ -2412,7 +2379,7 @@ class Primework {
         } else {
           ctx.fillStyle = s.background || '#e8e8e8'; ctx.fillRect(g.x,g.y,g.width,g.height);
           if (node._videoError || !node.src) {
-            ctx.fillStyle='#8d8d8d'; ctx.font='11px IBM Plex Mono,monospace';
+            ctx.fillStyle='#888888'; ctx.font='11px '+this._styles.resolve('code').font;
             ctx.textAlign='center'; ctx.textBaseline='middle';
             ctx.fillText(node._videoError ? 'failed to load' : (node.alt || 'video'), g.x+g.width/2, g.y+g.height/2);
           }
@@ -2459,7 +2426,7 @@ class Primework {
         ctx.strokeStyle='#c8c8c8';
         ctx.beginPath(); ctx.moveTo(g.x,g.y); ctx.lineTo(g.x+g.width,g.y+g.height); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(g.x+g.width,g.y); ctx.lineTo(g.x,g.y+g.height); ctx.stroke();
-        ctx.fillStyle='#8d8d8d'; ctx.font='11px IBM Plex Mono,monospace';
+        ctx.fillStyle='#888888'; ctx.font='11px '+this._styles.resolve('code').font;
         ctx.textAlign='center'; ctx.textBaseline='middle';
         ctx.fillText(node._imgErr ? 'failed to load' : (node.alt||'image'), g.x+g.width/2, g.y+g.height/2);
         ctx.restore();
@@ -2468,7 +2435,7 @@ class Primework {
 
       case 'divider': {
         ctx.save();
-        ctx.strokeStyle=s.color||'#e0e0e0'; ctx.lineWidth=s.thickness||1;
+        ctx.strokeStyle=s.color||'#cccccc'; ctx.lineWidth=s.thickness||1;
         if (s.style==='dashed') ctx.setLineDash([6,4]);
         ctx.beginPath(); ctx.moveTo(g.x,g.y+g.height/2); ctx.lineTo(g.x+g.width,g.y+g.height/2); ctx.stroke();
         ctx.restore();
@@ -2495,8 +2462,8 @@ class Primework {
       else ctx.fillRect(g.x,g.y,g.width,g.height);
     }
     ctx.shadowColor='transparent'; ctx.shadowBlur=0; ctx.shadowOffsetY=0;
-    if (s.border || (s.borderWidth && s.borderColor)) {
-      ctx.strokeStyle = s.border || s.borderColor || '#e0e0e0';
+    if (s.border || s.borderWidth) {
+      ctx.strokeStyle = s.border || s.borderColor || '#cccccc';
       ctx.lineWidth   = s.borderWidth || 1;
       if (s.borderRadius) ctx.stroke();
       else ctx.strokeRect(g.x,g.y,g.width,g.height);
@@ -2651,7 +2618,7 @@ class Primework {
     }
 
     // ── Draw text ────────────────────────────────────────────────────────────
-    ctx.fillStyle    = s.color || '#161616';
+    ctx.fillStyle    = s.color || '#000000';
     // _vAlignShift already applied to py above (before highlight drawing)
 
     ctx.textBaseline = 'top';
@@ -2672,7 +2639,7 @@ class Primework {
       ctx.fillText(dc.dcChar, originX, py + dc.dcTop);
       ctx.restore();
       ctx.font = fontStr;
-      ctx.fillStyle = s.color || '#161616';
+      ctx.fillStyle = s.color || '#000000';
       if (cs !== 0 && 'letterSpacing' in ctx) ctx.letterSpacing = (cs * size) + 'px';
       let line = '', lineIdx = 0, fy = py;
       const xAt = i => i < dc.dcLines ? originX + dc.dcIndent : originX - omaShift;
@@ -2895,6 +2862,9 @@ class Primework {
     }
     if (type === 'image') {
       el.setAttribute('alt', node.alt || content || '');
+      // The pixels live on the canvas. Without a src the browser paints its
+      // broken-image icon over them, so the alias carries a transparent pixel.
+      if (el.tagName === 'IMG') el.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
     } else if (type !== 'divider' && type !== 'rect') {
       el.textContent = content || '';
     }
@@ -3023,8 +2993,8 @@ class Primework {
 
       el.style.outline = (this.htmlMode && !isDecorative)
         ? (id === this.focusedId
-            ? '2px solid rgba(15,98,254,0.9)'
-            : '1px dashed rgba(69,137,255,0.25)')
+            ? '2px solid ' + (this._config.focusRingColor || 'rgba(128,128,128,0.9)')
+            : '1px dashed ' + (this._config.aliasOutlineColor || 'rgba(128,128,128,0.4)'))
         : 'none';
     }
   }
@@ -3383,37 +3353,6 @@ class NodeBuilder {
 //
 //  Tokens can also be spread with style({...S.body, color:'#fff'}) for overrides.
 // =============================================================================
-// pw.theme('white' | 'g100') -- apply a Carbon theme's text/surface tokens
-// to every element type. pw.token('textSecondary') reads the active theme.
-Primework.prototype.theme = function(name) {
-  const t = CARBON[name];
-  if (!t) throw new Error(`Primework: unknown theme '${name}'. Use 'white' or 'g100'.`);
-  this._theme = name;
-  return this.styles({
-    heading1:{color:t.textPrimary}, heading2:{color:t.textPrimary},
-    heading3:{color:t.textPrimary}, heading4:{color:t.textPrimary},
-    heading5:{color:t.textPrimary}, heading6:{color:t.textPrimary},
-    subheading:{color:t.textPrimary},
-    paragraph:{color:t.textPrimary},
-    blockquote:{color:t.textPrimary},
-    code:{color:t.textPrimary},
-    link:{color:t.linkPrimary},
-    button:{color:t.textOnColor, background:t.interactive},
-    label:{color:t.linkPrimary},
-    divider:{color:t.border},
-    rect:{background:t.layer},
-    image:{background:t.layer},
-  });
-};
-
-// pw.token(key) -- read a semantic token for the active theme.
-//   pw.token('textHelper')  ->  '#8d8d8d' under g100
-Primework.prototype.token = function(key) {
-  const t = CARBON[this._theme || 'white'];
-  if (!(key in t)) throw new Error(`Primework: unknown token '${key}'.`);
-  return t[key];
-};
-
 Primework.prototype.define = function(styleMap) {
   const resolved = Object.create(null);
   const resolve = (key, visited = new Set()) => {
